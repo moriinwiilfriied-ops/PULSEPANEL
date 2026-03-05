@@ -3,7 +3,7 @@
  * Fallback mock si erreur ou vide.
  */
 
-import { supabase } from "@/src/lib/supabase";
+import { supabase, getCurrentOrgId } from "@/src/lib/supabase";
 import {
   getCampaigns as getMockCampaigns,
   getCampaignStats as getMockCampaignStats,
@@ -17,6 +17,7 @@ import {
 
 export interface CampaignRow {
   id: string;
+  org_id: string | null;
   name: string | null;
   template: string;
   question: string;
@@ -53,11 +54,16 @@ function rowToCampaign(row: CampaignRow): Campaign {
   };
 }
 
-/** Liste des campagnes : Supabase avec fallback mock. */
+/** Liste des campagnes de l'org courant (dashboard multi-tenant). */
 export async function getCampaigns(): Promise<Campaign[]> {
+  const orgId = await getCurrentOrgId();
+  if (!orgId) {
+    return getMockCampaigns();
+  }
   const { data, error } = await supabase
     .from("campaigns")
-    .select("id, name, template, question, options, targeting, quota, reward_cents, price_cents, status, created_at")
+    .select("id, org_id, name, template, question, options, targeting, quota, reward_cents, price_cents, status, created_at")
+    .eq("org_id", orgId)
     .order("created_at", { ascending: false });
   if (error) {
     console.warn("[Supabase] getCampaigns", error.message);
@@ -79,7 +85,7 @@ export async function getCampaignStats(campaignId: string): Promise<{
 } | null> {
   const { data: campaignRow, error: campError } = await supabase
     .from("campaigns")
-    .select("id, name, template, question, options, targeting, quota, reward_cents, price_cents, status, created_at")
+    .select("id, org_id, name, template, question, options, targeting, quota, reward_cents, price_cents, status, created_at")
     .eq("id", campaignId)
     .single();
   if (campError || !campaignRow) {
@@ -122,7 +128,7 @@ export async function getCampaignStats(campaignId: string): Promise<{
   };
 }
 
-/** Créer une campagne : insert Supabase puis retourne la campagne (avec fallback mock si erreur). */
+/** Créer une campagne pour l'org courant (org_id requis). */
 export async function createCampaign(params: {
   name: string;
   template: CampaignTemplate;
@@ -132,12 +138,26 @@ export async function createCampaign(params: {
   quota: number;
   rewardUser: number;
 }): Promise<Campaign> {
+  const orgId = await getCurrentOrgId();
+  if (!orgId) {
+    console.warn("[Supabase] createCampaign: no org");
+    return addMockCampaign({
+      name: params.name,
+      template: params.template,
+      question: params.question,
+      options: params.options,
+      targeting: params.targeting,
+      quota: params.quota,
+      rewardUser: params.rewardUser,
+    });
+  }
   const pricePerResponse = calcPricePerResponse(params.rewardUser);
   const reward_cents = Math.round(params.rewardUser * 100);
   const price_cents = Math.round(pricePerResponse * 100);
   const { data, error } = await supabase
     .from("campaigns")
     .insert({
+      org_id: orgId,
       name: params.name || null,
       template: params.template,
       question: params.question,
@@ -148,7 +168,7 @@ export async function createCampaign(params: {
       price_cents,
       status: "active",
     })
-    .select("id, name, template, question, options, targeting, quota, reward_cents, price_cents, status, created_at")
+    .select("id, org_id, name, template, question, options, targeting, quota, reward_cents, price_cents, status, created_at")
     .single();
   if (error) {
     console.warn("[Supabase] createCampaign", error.message);

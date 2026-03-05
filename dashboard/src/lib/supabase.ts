@@ -22,3 +22,35 @@ export async function ensureAnonSession(): Promise<void> {
     console.warn('[Supabase] signInAnonymously failed. Enable Anonymous in Auth providers.', error.message);
   }
 }
+
+/**
+ * Retourne l'org du user courant (première org dont il est membre). null si aucune.
+ */
+export async function getCurrentOrgId(): Promise<string | null> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+  const { data } = await supabase
+    .from('org_members')
+    .select('org_id')
+    .eq('user_id', user.id)
+    .limit(1)
+    .single();
+  return data?.org_id ?? null;
+}
+
+/**
+ * Si le user n'a aucune org, crée "PulsePanel (demo)" et le met owner (trigger).
+ * À appeler après ensureAnonSession().
+ */
+export async function ensureOrg(): Promise<void> {
+  const orgId = await getCurrentOrgId();
+  if (orgId) return;
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return;
+  const { error } = await supabase
+    .from('orgs')
+    .insert({ name: 'PulsePanel (demo)', created_by: user.id });
+  if (error) {
+    console.warn('[Supabase] ensureOrg failed', error.message);
+  }
+}

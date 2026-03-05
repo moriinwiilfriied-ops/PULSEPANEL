@@ -43,11 +43,11 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=votre_anon_key_ici
 
 ---
 
-## 3. Exécuter la migration SQL
+## 3. Exécuter les migrations SQL
 
 1. Dans le **Supabase Dashboard**, ouvrez **SQL Editor**.
-2. Créez une nouvelle requête et collez le contenu du fichier **`supabase/migrations/0001_init.sql`** (à la racine du repo).
-3. Exécutez la requête (Run). Les tables `users`, `campaigns`, `responses`, `user_balances`, `ledger_entries`, `flags` sont créées, avec les index, le trigger et les policies RLS.
+2. **Migration 1** : créez une requête et collez **`supabase/migrations/0001_init.sql`**. Exécutez (Run). Tables : `users`, `campaigns`, `responses`, `user_balances`, `ledger_entries`, `flags` + RLS.
+3. **Migration 2 (multi-tenant)** : nouvelle requête, collez **`supabase/migrations/0002_orgs.sql`**. Exécutez (Run). Tables : `orgs`, `org_members` ; colonne `org_id` sur `campaigns` ; policies RLS mises à jour (chaque org ne voit que ses campagnes ; le feed mobile reste public pour les campagnes `status = 'active'`).
 
 ---
 
@@ -72,7 +72,18 @@ Pour que Mobile et Dashboard puissent appeler `signInAnonymously()` (et obtenir 
 
 - **Sans clés** (pas de `.env` / `.env.local`) : tout reste en mock (campagnes et réponses en mémoire, pas d’appel Supabase).
 - **Avec clés** :
-  - **Dashboard** : liste et création de campagnes dans Supabase ; détail campagne avec réponses Supabase (fallback mock si erreur).
-  - **Mobile** : onboarding upsert dans `public.users` ; feed chargé depuis `public.campaigns` (status = `active`) ; envoi des réponses dans `public.responses` ; wallet reste en mock local (pending/disponible).
+  - **Dashboard (multi-tenant)** : à la première visite, une org par défaut **« PulsePanel (demo) »** est créée et l’utilisateur anonyme en devient owner. La liste des campagnes et la création ne concernent que **cette org** (chaque org ne voit que ses campagnes et réponses). Détail campagne avec réponses de l’org (fallback mock si erreur).
+  - **Mobile** : onboarding upsert dans `public.users` ; feed chargé depuis `public.campaigns` où `status = 'active'` (toutes les campagnes actives, sans filtre org) ; envoi des réponses dans `public.responses` ; wallet reste en mock local (pending/disponible).
 
 Aucune clé secrète ne doit être commitée : utilisez uniquement **Project URL** et **anon key** dans les fichiers d’env ci-dessus.
+
+---
+
+## 7. Notion d’organisation (org)
+
+À partir de la migration **0002_orgs.sql** :
+
+- Chaque **organisation** (`public.orgs`) a des **membres** (`public.org_members`) avec un rôle (`owner`, `editor`).
+- Les **campagnes** sont rattachées à une org (`campaigns.org_id`). Seuls les membres de cette org peuvent les créer, modifier, supprimer et voir les réponses.
+- Le **dashboard** : au premier chargement (après auth anonyme), si l’utilisateur n’a aucune org, une org **« PulsePanel (demo) »** est créée et il en devient owner. Toutes les campagnes créées depuis le dashboard sont associées à cette org.
+- Le **mobile** : ne filtre pas par org ; il affiche toutes les campagnes actives dans le feed. Les réponses sont insérées avec `user_id = auth.uid()` ; l’utilisateur ne voit pas les réponses des autres, seul le dashboard (membre de l’org de la campagne) peut voir les réponses de ses campagnes.
