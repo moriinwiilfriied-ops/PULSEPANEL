@@ -4,11 +4,11 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
-  addCampaign,
   calcPricePerResponse,
   type CampaignTemplate,
   type CampaignTargeting,
 } from "@/src/lib/mockData";
+import { createCampaign } from "@/src/lib/supabaseCampaigns";
 
 const TEMPLATES: { value: CampaignTemplate; label: string }[] = [
   { value: "A/B", label: "A/B" },
@@ -56,7 +56,7 @@ export default function NewCampaignPage() {
     );
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const options = optionsText
       .split("\n")
@@ -68,7 +68,7 @@ export default function NewCampaignPage() {
       regions: regions.length === 0 ? [] : regions.filter((r) => r !== "Toutes"),
       tags,
     };
-    const campaign = addCampaign({
+    const campaign = await createCampaign({
       name: name || "Sans titre",
       template,
       question: question || "Question",

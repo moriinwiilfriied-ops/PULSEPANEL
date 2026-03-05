@@ -1,10 +1,17 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { getCampaigns } from "@/src/lib/mockData";
+import { getCampaigns } from "@/src/lib/supabaseCampaigns";
+import type { Campaign } from "@/src/lib/mockData";
 
 export default function Home() {
-  const campaigns = getCampaigns();
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    getCampaigns().then(setCampaigns).finally(() => setLoading(false));
+  }, []);
 
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
@@ -27,7 +34,9 @@ export default function Home() {
           Campagnes
         </h2>
 
-        {campaigns.length === 0 ? (
+        {loading ? (
+          <p className="text-zinc-500 dark:text-zinc-400 py-8">Chargement…</p>
+        ) : campaigns.length === 0 ? (
           <p className="text-zinc-500 dark:text-zinc-400 py-8">
             Aucune campagne. Créez-en une pour commencer.
           </p>

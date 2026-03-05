@@ -18,6 +18,14 @@ export interface MockQuestion {
   campaignId?: string;
 }
 
+/** Item normalisé pour le feed : question lisible + badge source (SB / MOCK). */
+export type FeedQuestionSource = 'supabase' | 'mock';
+
+export interface FeedQuestion extends MockQuestion {
+  questionText: string;
+  source: FeedQuestionSource;
+}
+
 export interface HistoryEntry {
   id: string;
   questionId: string;
@@ -102,8 +110,15 @@ export function submitAnswer(questionId: string, answer: string): HistoryEntry {
 
 /**
  * Questions encore "disponibles" pour le feed (non répondues par l'utilisateur).
+ * Retourne des FeedQuestion avec source: 'mock' et questionText.
  */
-export function getAvailableQuestions(): MockQuestion[] {
-  const answeredIds = getAppStore().getState().history.map((h) => h.questionId);
-  return mockQuestions.filter((q) => !answeredIds.includes(q.id));
+export function getAvailableQuestions(): FeedQuestion[] {
+  const answeredIds = getAppStore().history.map((h) => h.questionId);
+  return mockQuestions
+    .filter((q) => !answeredIds.includes(q.id))
+    .map((q) => ({
+      ...q,
+      questionText: q.question || 'Question (à définir)',
+      source: 'mock' as const,
+    }));
 }

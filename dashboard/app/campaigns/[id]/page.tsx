@@ -1,15 +1,29 @@
 "use client";
 
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { getCampaignStats } from "@/src/lib/mockData";
+import { getCampaignStats } from "@/src/lib/supabaseCampaigns";
+
+type Stats = Awaited<ReturnType<typeof getCampaignStats>>;
 
 export default function CampaignDetailPage() {
   const params = useParams();
-  const router = useRouter();
   const id = params.id as string;
-  const stats = getCampaignStats(id);
+  const [stats, setStats] = useState<Stats>(null);
+  const [loading, setLoading] = useState(true);
 
+  useEffect(() => {
+    getCampaignStats(id).then(setStats).finally(() => setLoading(false));
+  }, [id]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 flex items-center justify-center">
+        <p className="text-zinc-500">Chargement…</p>
+      </div>
+    );
+  }
   if (!stats) {
     return (
       <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 flex items-center justify-center">

@@ -15,16 +15,28 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppStore } from '@/store/useAppStore';
 import { Text } from '@/components/Themed';
+import { useColorScheme } from '@/components/useColorScheme';
+import Colors from '@/constants/Colors';
+import { upsertUserOnboarding } from '@/lib/supabaseApi';
 
 const REGIONS = ['Île-de-France', 'Provence-Alpes-Côte d\'Azur', 'Auvergne-Rhône-Alpes', 'Occitanie', 'Autre'];
 const TAGS = ['Tech', 'Mode', 'Alimentation', 'Sport', 'Voyage', 'Culture', 'Santé', 'Finance'];
 
 export default function OnboardingScreen() {
   const insets = useSafeAreaInsets();
+  const colorScheme = useColorScheme();
+  const colors = Colors[colorScheme];
   const { age, region, tags, setOnboarding, completeOnboarding } = useAppStore();
   const [ageVal, setAgeVal] = useState(age?.toString() ?? '');
   const [regionVal, setRegionVal] = useState(region ?? '');
   const [selectedTags, setSelectedTags] = useState<string[]>(tags);
+
+  const textColor = colors.text;
+  const placeholderColor = colors.tabIconDefault;
+  const inputBg = colorScheme === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)';
+  const borderColor = colors.tabIconDefault;
+  const selectionColor = colors.tint;
+  const keyboardAppearance = colorScheme;
 
   const toggleTag = (tag: string) => {
     setSelectedTags((prev) =>
@@ -32,11 +44,15 @@ export default function OnboardingScreen() {
     );
   };
 
-  const handleStart = () => {
+  const handleStart = async () => {
     const a = parseInt(ageVal, 10);
     if (Number.isNaN(a) || a < 18) return;
     setOnboarding(a, regionVal || null, selectedTags);
     completeOnboarding();
+    const ageBucket = a < 25 ? '18-24' : a < 35 ? '25-34' : a < 45 ? '35-44' : '45+';
+    if (process.env.EXPO_PUBLIC_SUPABASE_URL) {
+      await upsertUserOnboarding({ ageBucket, region: regionVal || null, tags: selectedTags });
+    }
     router.replace('/(tabs)/feed');
   };
 
@@ -45,43 +61,57 @@ export default function OnboardingScreen() {
     return !Number.isNaN(a) && a >= 18;
   })();
 
+  const inputStyle = [
+    styles.input,
+    {
+      color: textColor,
+      backgroundColor: inputBg,
+      borderColor,
+    },
+  ];
+
   return (
     <ScrollView
-      style={[styles.container, { paddingTop: insets.top + 24 }]}
+      style={[styles.container, { paddingTop: insets.top + 24, backgroundColor: colors.background }]}
       contentContainerStyle={styles.content}
       keyboardShouldPersistTaps="handled"
     >
-      <Text style={styles.title}>Bienvenue sur PulsePanel</Text>
-      <Text style={styles.subtitle}>Quelques infos pour personnaliser votre feed.</Text>
+      <Text style={[styles.title, { color: textColor }]}>Bienvenue sur PulsePanel</Text>
+      <Text style={[styles.subtitle, { color: textColor }]}>Quelques infos pour personnaliser votre feed.</Text>
 
-      <Text style={styles.label}>Âge (18+)</Text>
+      <Text style={[styles.label, { color: textColor }]}>Âge (18+)</Text>
       <TextInput
-        style={styles.input}
+        style={inputStyle}
         value={ageVal}
         onChangeText={setAgeVal}
         placeholder="Ex: 25"
+        placeholderTextColor={placeholderColor}
+        selectionColor={selectionColor}
         keyboardType="number-pad"
-        placeholderTextColor="#888"
+        keyboardAppearance={keyboardAppearance}
       />
 
-      <Text style={styles.label}>Région</Text>
+      <Text style={[styles.label, { color: textColor }]}>Région</Text>
       <TextInput
-        style={styles.input}
+        style={inputStyle}
         value={regionVal}
         onChangeText={setRegionVal}
         placeholder="Ex: Île-de-France"
-        placeholderTextColor="#888"
+        placeholderTextColor={placeholderColor}
+        selectionColor={selectionColor}
+        autoCapitalize="none"
+        keyboardAppearance={keyboardAppearance}
       />
 
-      <Text style={styles.label}>Centres d'intérêt (optionnel)</Text>
+      <Text style={[styles.label, { color: textColor }]}>Centres d'intérêt (optionnel)</Text>
       <View style={styles.chips}>
         {TAGS.map((tag) => (
           <TouchableOpacity
             key={tag}
-            style={[styles.chip, selectedTags.includes(tag) && styles.chipSelected]}
+            style={[styles.chip, { borderColor }, selectedTags.includes(tag) && styles.chipSelected]}
             onPress={() => toggleTag(tag)}
           >
-            <Text style={[styles.chipText, selectedTags.includes(tag) && styles.chipTextSelected]}>
+            <Text style={[styles.chipText, { color: textColor }, selectedTags.includes(tag) && styles.chipTextSelected]}>
               {tag}
             </Text>
           </TouchableOpacity>
@@ -107,7 +137,6 @@ const styles = StyleSheet.create({
   label: { fontSize: 14, fontWeight: '600', marginBottom: 8, opacity: 0.9 },
   input: {
     borderWidth: 1,
-    borderColor: '#ddd',
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 14,
@@ -120,7 +149,6 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#ddd',
   },
   chipSelected: { backgroundColor: '#171717', borderColor: '#171717' },
   chipText: { fontSize: 14 },

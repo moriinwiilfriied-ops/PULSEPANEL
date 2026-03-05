@@ -4,7 +4,7 @@
  */
 
 import { router, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   StyleSheet,
   View,
@@ -13,38 +13,98 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text } from '@/components/Themed';
-import { mockQuestions, submitAnswer, type MockQuestion, type QuestionType } from '@/lib/mockData';
+import { useColorScheme } from '@/components/useColorScheme';
+import Colors from '@/constants/Colors';
+import { mockQuestions, submitAnswer, type MockQuestion } from '@/lib/mockData';
+import { fetchCampaignById, submitResponseToSupabase } from '@/lib/supabaseApi';
 
 export default function AnswerScreen() {
   const insets = useSafeAreaInsets();
+  const colorScheme = useColorScheme();
+  const colors = Colors[colorScheme];
   const { questionId } = useLocalSearchParams<{ questionId: string }>();
-  const question = mockQuestions.find((q) => q.id === questionId);
+  const textColor = colors.text;
+  const mutedColor = colors.tabIconDefault;
+  const sheetBg = colors.background;
+  const cardBg = colorScheme === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)';
+  const borderColor = colors.tabIconDefault;
+  const selectionColor = colors.tint;
+  const [supabaseQuestion, setSupabaseQuestion] = useState<MockQuestion | null>(null);
+  const [loading, setLoading] = useState(!!questionId && !mockQuestions.find((q) => q.id === questionId) && /^[0-9a-f-]{36}$/i.test(questionId ?? ''));
+  const question = mockQuestions.find((q) => q.id === questionId) ?? supabaseQuestion;
   const [selectedOption, setSelectedOption] = useState<string | null>(null);
   const [textAnswer, setTextAnswer] = useState('');
   const [step, setStep] = useState<'form' | 'reward'>('form');
   const [rewardAmount, setRewardAmount] = useState(0);
 
+  useEffect(() => {
+    if (!questionId || question) return;
+    if (!/^[0-9a-f-]{36}$/i.test(questionId)) return;
+    (async () => {
+      const row = await fetchCampaignById(questionId);
+      if (row) {
+        const options = Array.isArray(row.options) ? row.options : [];
+        const questionText = (row.question ?? row.name ?? '').trim() || 'Question (à définir)';
+        const opts = options.length ? options : ['Oui', 'Non'];
+        setSupabaseQuestion({
+          id: row.id,
+          question: questionText,
+          type: (row.template === 'A/B' ? 'poll' : 'choice') as MockQuestion['type'],
+          options: opts,
+          reward: row.reward_cents / 100,
+          etaSeconds: 45,
+          campaignId: row.id,
+        });
+      }
+      setLoading(false);
+    })();
+  }, [questionId, question]);
+
+  if (loading) {
+    return (
+      <View style={[styles.container, styles.center, { backgroundColor: sheetBg }]}>
+        <ActivityIndicator size="large" color={colors.tint} />
+      </View>
+    );
+  }
+
   if (!question) {
     return (
-      <View style={styles.container}>
-        <Text>Question introuvable.</Text>
+      <View style={[styles.container, { backgroundColor: sheetBg }]}>
+        <Text style={{ color: textColor }}>Question introuvable.</Text>
         <TouchableOpacity onPress={() => router.back()}>
-          <Text style={styles.link}>Retour</Text>
+          <Text style={[styles.link, { color: colors.tint }]}>Retour</Text>
         </TouchableOpacity>
       </View>
     );
   }
 
-  const handleSend = () => {
+  const handleSend = async () => {
     let answer: string;
     if (question.type === 'text') {
       answer = textAnswer.trim() || '(vide)';
     } else if (selectedOption) {
       answer = selectedOption;
     } else {
+      return;
+    }
+    const isSupabase = /^[0-9a-f-]{36}$/i.test(question.id);
+    if (isSupabase) {
+      const { error } = await submitResponseToSupabase({
+        campaignId: question.id,
+        question: question.question,
+        answer,
+        rewardCents: Math.round(question.reward * 100),
+      });
+      if (error) {
+        return;
+      }
+      setRewardAmount(question.reward);
+      setStep('reward');
       return;
     }
     const entry = submitAnswer(question.id, answer);
@@ -61,12 +121,12 @@ export default function AnswerScreen() {
 
   if (step === 'reward') {
     return (
-      <View style={[styles.container, styles.rewardContainer, { paddingTop: insets.top + 48 }]}>
-        <View style={styles.rewardCard}>
-          <Text style={styles.rewardTitle}>Réponse enregistrée</Text>
+      <View style={[styles.container, styles.rewardContainer, { paddingTop: insets.top + 48, backgroundColor: sheetBg }]}>
+        <View style={[styles.rewardCard, { backgroundColor: cardBg, borderWidth: 1, borderColor: borderColor }]}>
+          <Text style={[styles.rewardTitle, { color: textColor }]}>Réponse enregistrée</Text>
           <Text style={styles.rewardAmount}>+{rewardAmount.toFixed(2)} €</Text>
-          <Text style={styles.rewardSub}>Crédité en attente de validation.</Text>
-          <TouchableOpacity style={styles.rewardBtn} onPress={handleCloseReward}>
+          <Text style={[styles.rewardSub, { color: mutedColor }]}>Crédité en attente de validation.</Text>
+          <TouchableOpacity style={[styles.rewardBtn, { backgroundColor: colors.tint }]} onPress={handleCloseReward}>
             <Text style={styles.rewardBtnText}>OK</Text>
           </TouchableOpacity>
         </View>
@@ -74,9 +134,13 @@ export default function AnswerScreen() {
     );
   }
 
+  const optionBg = (selected: boolean) =>
+    selected ? (colorScheme === 'dark' ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.08)') : cardBg;
+  const optionBorder = (selected: boolean) => (selected ? colors.tint : borderColor);
+
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={[styles.container, { backgroundColor: sheetBg }]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={insets.top + 60}
     >
@@ -84,16 +148,17 @@ export default function AnswerScreen() {
         contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 24 }]}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={styles.question}>{question.question}</Text>
-        <Text style={styles.typeLabel}>{question.type}</Text>
+        <Text style={[styles.question, { color: textColor }]}>{question.question}</Text>
+        <Text style={[styles.typeLabel, { color: mutedColor }]}>{question.type}</Text>
 
         {question.type === 'text' && (
           <TextInput
-            style={styles.textInput}
+            style={[styles.textInput, { color: textColor, backgroundColor: cardBg, borderColor }]}
             value={textAnswer}
             onChangeText={setTextAnswer}
             placeholder="Votre réponse..."
-            placeholderTextColor="#888"
+            placeholderTextColor={mutedColor}
+            selectionColor={selectionColor}
             multiline
             numberOfLines={3}
           />
@@ -101,26 +166,39 @@ export default function AnswerScreen() {
 
         {(question.type === 'choice' || question.type === 'poll') && question.options && (
           <View style={styles.options}>
-            {question.options.map((opt) => (
-              <TouchableOpacity
-                key={opt}
-                style={[styles.option, selectedOption === opt && styles.optionSelected]}
-                onPress={() => setSelectedOption(opt)}
-              >
-                <Text style={[styles.optionText, selectedOption === opt && styles.optionTextSelected]}>
-                  {opt}
-                </Text>
-              </TouchableOpacity>
-            ))}
+            {question.options.map((opt) => {
+              const selected = selectedOption === opt;
+              return (
+                <TouchableOpacity
+                  key={opt}
+                  style={[
+                    styles.option,
+                    { backgroundColor: optionBg(selected), borderColor: optionBorder(selected) },
+                  ]}
+                  onPress={() => setSelectedOption(opt)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.optionText, { color: textColor }, selected && styles.optionTextSelected]}>
+                    {opt}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
         )}
 
         <TouchableOpacity
-          style={[styles.sendBtn, !canSend && styles.sendBtnDisabled]}
+          style={[
+            styles.sendBtn,
+            { backgroundColor: colors.tint },
+            !canSend && styles.sendBtnDisabled,
+          ]}
           onPress={handleSend}
           disabled={!canSend}
         >
-          <Text style={styles.sendBtnText}>Envoyer</Text>
+          <Text style={[styles.sendBtnText, { color: colorScheme === 'dark' ? '#000' : '#fff' }]}>
+            Envoyer
+          </Text>
         </TouchableOpacity>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -184,4 +262,5 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   rewardBtnText: { color: '#fff', fontWeight: '600' },
+  center: { justifyContent: 'center', alignItems: 'center' },
 });
