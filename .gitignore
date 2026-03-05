@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+
+# Env (ne jamais commiter les secrets)
+.env
+.env.local
+.env.*.local
+
+# Build / output
+dist/
+build/
+.next/
+out/
+.expo/
+*.tsbuildinfo
+
+# Logs & cache
+*.log
+npm-debug.log*
+.npm
+.cache
+.turbo
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Expo
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+
+# Supabase
+supabase/.branches
+supabase/.temp
+
+# Debug
+*.local

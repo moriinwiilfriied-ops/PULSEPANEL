@@ -1,0 +1,10 @@
+{
+  "name": "voxsnap-monorepo",
+  "private": true,
+  "scripts": {
+    "dev:mobile": "npm run start --prefix mobile",
+    "dev:dashboard": "npm run dev --prefix dashboard",
+    "lint": "echo 'Lint placeholder'",
+    "typecheck": "echo 'Typecheck placeholder'"
+  }
+}

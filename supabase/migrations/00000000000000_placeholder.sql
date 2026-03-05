@@ -1,0 +1,2 @@
+-- Placeholder: ajoutez vos migrations ici.
+-- Voir docs/schema.sql pour le plan de tables.
