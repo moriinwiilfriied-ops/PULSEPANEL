@@ -93,6 +93,7 @@ export interface OrgLedgerRow {
   amount_cents: number;
   reason: string | null;
   campaign_id: string | null;
+  campaign_title?: string | null;
 }
 
 /**
