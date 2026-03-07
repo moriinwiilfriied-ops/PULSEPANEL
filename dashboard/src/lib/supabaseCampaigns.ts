@@ -4,6 +4,11 @@
  */
 
 import { supabase, getCurrentOrgId } from "@/src/lib/supabase";
+
+/** Coût facturé par réponse (centimes), formule alignée avec la DB. */
+export function computeCostPerResponseCents(rewardCents: number): number {
+  return Math.ceil(rewardCents * 1.7 + 35);
+}
 import {
   getCampaigns as getMockCampaigns,
   getCampaignStats as getMockCampaignStats,
@@ -199,7 +204,12 @@ export async function getCampaignStats(campaignId: string): Promise<{
   };
 }
 
-/** Créer une campagne pour l'org courant (org_id requis). */
+export type CreateCampaignResult =
+  | { campaign: Campaign }
+  | { error: "insufficient_org_credit" }
+  | { error: "creation_failed"; message?: string };
+
+/** Créer une campagne pour l'org courant (org_id requis). Le trigger DB facture si status=active. */
 export async function createCampaign(params: {
   name: string;
   template: CampaignTemplate;
@@ -210,11 +220,11 @@ export async function createCampaign(params: {
   rewardUser: number;
   templateKey?: string | null;
   templateVersion?: number;
-}): Promise<Campaign> {
+}): Promise<CreateCampaignResult> {
   const orgId = await getCurrentOrgId();
   if (!orgId) {
     console.warn("[Supabase] createCampaign: no org");
-    return addMockCampaign({
+    const mock = addMockCampaign({
       name: params.name,
       template: params.template,
       question: params.question,
@@ -223,10 +233,10 @@ export async function createCampaign(params: {
       quota: params.quota,
       rewardUser: params.rewardUser,
     });
+    return { campaign: mock };
   }
-  const pricePerResponse = calcPricePerResponse(params.rewardUser);
   const reward_cents = Math.round(params.rewardUser * 100);
-  const price_cents = Math.round(pricePerResponse * 100);
+  const price_cents = Math.round(calcPricePerResponse(params.rewardUser) * 100);
   const targeting = { ...params.targeting };
   if (params.targeting.responseType) {
     (targeting as Record<string, unknown>).responseType = params.targeting.responseType;
@@ -247,21 +257,17 @@ export async function createCampaign(params: {
       price_cents,
       status: "active",
     })
-    .select("id, org_id, name, template, template_key, template_version, question, options, targeting, quota, reward_cents, price_cents, status, created_at")
+    .select("id, org_id, name, template, template_key, template_version, question, options, targeting, quota, reward_cents, price_cents, status, created_at, responses_count")
     .single();
   if (error) {
+    const msg = (error as { message?: string }).message ?? "";
+    if (msg.includes("insufficient_org_credit")) {
+      return { error: "insufficient_org_credit" };
+    }
     console.warn("[Supabase] createCampaign", error.message);
-    return addMockCampaign({
-      name: params.name,
-      template: params.template,
-      question: params.question,
-      options: params.options,
-      targeting: params.targeting,
-      quota: params.quota,
-      rewardUser: params.rewardUser,
-    });
+    return { error: "creation_failed", message: msg };
   }
-  return rowToCampaign(data as CampaignRow);
+  return { campaign: rowToCampaign(data as CampaignRow) };
 }
 
 /** Pause / Reprendre / Terminer : met à jour le status. */
@@ -302,11 +308,17 @@ export async function validateCampaignPayouts(campaignId: string): Promise<{
   };
 }
 
-/** Dupliquer une campagne (même org, status active, responses_count 0). */
+export type DuplicateCampaignResult =
+  | { campaign: Campaign }
+  | { error: "insufficient_org_credit" }
+  | { error: "failed"; message?: string }
+  | null;
+
+/** Dupliquer une campagne (même org, status active). Facturation au passage en active. */
 export async function duplicateCampaign(
   campaignId: string,
   overrides?: { nameSuffix?: string; question?: string }
-): Promise<Campaign | null> {
+): Promise<DuplicateCampaignResult> {
   const orgId = await getCurrentOrgId();
   if (!orgId) return null;
   const { data: source, error: fetchErr } = await supabase
@@ -335,8 +347,13 @@ export async function duplicateCampaign(
     })
     .select("id, org_id, name, template, template_key, template_version, question, options, targeting, quota, reward_cents, price_cents, status, created_at, responses_count")
     .single();
-  if (insertErr || !created) return null;
-  return rowToCampaign(created as CampaignRow);
+  if (insertErr) {
+    const msg = (insertErr as { message?: string }).message ?? "";
+    if (msg.includes("insufficient_org_credit")) return { error: "insufficient_org_credit" };
+    return { error: "failed", message: msg };
+  }
+  if (!created) return null;
+  return { campaign: rowToCampaign(created as CampaignRow) };
 }
 
 /** Retrait en attente (dashboard). */

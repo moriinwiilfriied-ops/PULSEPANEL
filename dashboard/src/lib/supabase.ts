@@ -68,3 +68,52 @@ export async function ensureOrg(): Promise<void> {
     console.warn('[Supabase] ensureOrg failed', error.message);
   }
 }
+
+export interface OrgBalance {
+  available_cents: number;
+  spent_cents: number;
+}
+
+/**
+ * Solde du wallet entreprise (org). null si pas membre ou erreur.
+ */
+export async function getOrgBalance(orgId: string): Promise<OrgBalance | null> {
+  const { data, error } = await supabase
+    .from('org_balances')
+    .select('available_cents, spent_cents')
+    .eq('org_id', orgId)
+    .maybeSingle();
+  if (error) {
+    if (process.env.NODE_ENV === 'development') console.warn('[getOrgBalance]', error.message);
+    return null;
+  }
+  if (!data) return null;
+  const row = data as { available_cents?: number; spent_cents?: number };
+  return {
+    available_cents: Number(row.available_cents ?? 0),
+    spent_cents: Number(row.spent_cents ?? 0),
+  };
+}
+
+/**
+ * Recharge DEV du wallet org (RPC org_topup_dev). Pour tests.
+ */
+export async function orgTopupDev(
+  orgId: string,
+  amountCents: number
+): Promise<{ ok: true; added_cents: number; available_cents: number } | { ok: false; error: string }> {
+  const { data, error } = await supabase.rpc('org_topup_dev', {
+    _org_id: orgId,
+    _amount_cents: amountCents,
+  });
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+  const obj = data as { error?: string; added_cents?: number; available_cents?: number } | null;
+  if (obj?.error) return { ok: false, error: obj.error };
+  return {
+    ok: true,
+    added_cents: Number(obj?.added_cents ?? amountCents),
+    available_cents: Number(obj?.available_cents ?? 0),
+  };
+}

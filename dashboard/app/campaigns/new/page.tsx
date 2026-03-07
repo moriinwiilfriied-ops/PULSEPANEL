@@ -1,13 +1,14 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { type CampaignTargeting } from "@/src/lib/mockData";
 import {
-  calcPricePerResponse,
-  type CampaignTargeting,
-} from "@/src/lib/mockData";
-import { createCampaign } from "@/src/lib/supabaseCampaigns";
+  createCampaign,
+  computeCostPerResponseCents,
+} from "@/src/lib/supabaseCampaigns";
+import { getCurrentOrgId, getOrgBalance } from "@/src/lib/supabase";
 import {
   CAMPAIGN_TEMPLATES,
   templateKeyToLegacyTemplate,
@@ -45,9 +46,22 @@ export default function NewCampaignPage() {
   const [quota, setQuota] = useState(100);
   const [rewardUser, setRewardUser] = useState(0.2);
   const [questionError, setQuestionError] = useState("");
+  const [submitError, setSubmitError] = useState<"insufficient_org_credit" | "creation_failed" | null>(null);
+  const [orgCreditCents, setOrgCreditCents] = useState<number | null>(null);
 
-  const pricePerResponse = calcPricePerResponse(rewardUser);
-  const total = Math.round(quota * pricePerResponse * 100) / 100;
+  const rewardCents = Math.round(rewardUser * 100);
+  const costPerResponseCents = computeCostPerResponseCents(rewardCents);
+  const totalCostCents = quota * costPerResponseCents;
+  const costPerResponseEur = costPerResponseCents / 100;
+  const totalCostEur = totalCostCents / 100;
+  const creditInsufficient =
+    orgCreditCents !== null && totalCostCents > orgCreditCents;
+
+  useEffect(() => {
+    getCurrentOrgId().then((id) => {
+      if (id) getOrgBalance(id).then((b) => setOrgCreditCents(b?.available_cents ?? null));
+    });
+  }, []);
 
   const handleSelectTemplate = useCallback((preset: CampaignTemplatePreset) => {
     setSelectedPreset(preset);
@@ -86,6 +100,7 @@ export default function NewCampaignPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setQuestionError("");
+    setSubmitError(null);
     const questionTrimmed = question.trim();
     if (!questionTrimmed) {
       setQuestionError("La question est obligatoire.");
@@ -107,7 +122,7 @@ export default function NewCampaignPage() {
     const legacyTemplate = selectedPreset
       ? templateKeyToLegacyTemplate(selectedPreset.key)
       : "A/B";
-    const campaign = await createCampaign({
+    const result = await createCampaign({
       name: name || "Sans titre",
       template: legacyTemplate as "A/B" | "Price test" | "Slogan" | "Concept" | "NPS",
       question: questionTrimmed,
@@ -118,7 +133,15 @@ export default function NewCampaignPage() {
       templateKey: selectedPreset?.key ?? null,
       templateVersion: 1,
     });
-    router.push(`/campaigns/${campaign.id}`);
+    if ("error" in result) {
+      if (result.error === "insufficient_org_credit") {
+        setSubmitError("insufficient_org_credit");
+      } else {
+        setSubmitError("creation_failed");
+      }
+      return;
+    }
+    router.push(`/campaigns/${result.campaign.id}`);
   };
 
   return (
@@ -329,15 +352,41 @@ export default function NewCampaignPage() {
             </div>
           </div>
 
-          <div className="rounded-xl bg-zinc-100 dark:bg-zinc-800/50 p-4">
+          <div className="rounded-xl bg-zinc-100 dark:bg-zinc-800/50 p-4 space-y-1">
             <p className="text-sm text-zinc-600 dark:text-zinc-400">
-              Prix par réponse (mock) : <strong>{pricePerResponse.toFixed(2)} €</strong>
-              {" "}(reward × 1.7 + 0.35)
+              Récompense user : <strong>{rewardUser.toFixed(2)} €</strong>
             </p>
-            <p className="text-sm text-zinc-600 dark:text-zinc-400 mt-1">
-              Total estimé : <strong>{total.toFixed(2)} €</strong>
+            <p className="text-sm text-zinc-600 dark:text-zinc-400">
+              Coût facturé : <strong>{costPerResponseEur.toFixed(2)} €</strong> / réponse
             </p>
+            <p className="text-sm text-zinc-600 dark:text-zinc-400">
+              Total estimé : <strong>{totalCostEur.toFixed(2)} €</strong>
+            </p>
+            {creditInsufficient && (
+              <p className="text-sm text-amber-700 dark:text-amber-400 mt-2">
+                Votre crédit est insuffisant pour cette campagne. Rechargez votre compte (bouton « Recharger (DEV) » en haut).
+              </p>
+            )}
           </div>
+
+          {submitError === "insufficient_org_credit" && (
+            <div className="rounded-xl border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/30 p-4">
+              <p className="text-sm font-medium text-red-800 dark:text-red-200">
+                Crédit insuffisant. Rechargez votre compte entreprise.
+              </p>
+              <Link
+                href="/"
+                className="inline-block mt-2 text-sm text-red-700 dark:text-red-300 underline hover:no-underline"
+              >
+                Recharger (DEV)
+              </Link>
+            </div>
+          )}
+          {submitError === "creation_failed" && (
+            <p className="text-sm text-red-600 dark:text-red-400">
+              Création impossible.
+            </p>
+          )}
 
           <div className="flex gap-3">
             <button

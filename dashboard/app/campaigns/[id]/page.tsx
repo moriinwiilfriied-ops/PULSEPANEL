@@ -30,6 +30,7 @@ export default function CampaignDetailPage() {
   const [exportToast, setExportToast] = useState<"csv" | "json" | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const [exportLoading, setExportLoading] = useState(false);
+  const [duplicateError, setDuplicateError] = useState<"insufficient_org_credit" | "failed" | null>(null);
 
   const loadStats = () => {
     setLoading(true);
@@ -63,19 +64,25 @@ export default function CampaignDetailPage() {
 
   const handleDuplicate = async () => {
     setActionLoading(true);
-    const created = await duplicateCampaign(id);
+    setDuplicateError(null);
+    const result = await duplicateCampaign(id);
     setActionLoading(false);
-    if (created) router.push(`/campaigns/${created.id}`);
+    if (result && "campaign" in result) router.push(`/campaigns/${result.campaign.id}`);
+    else if (result?.error === "insufficient_org_credit") setDuplicateError("insufficient_org_credit");
+    else if (result?.error) setDuplicateError("failed");
   };
 
   const handleDuplicateVariant = async () => {
     setActionLoading(true);
-    const created = await duplicateCampaign(id, {
+    setDuplicateError(null);
+    const result = await duplicateCampaign(id, {
       nameSuffix: " — variante A/B",
       question: "Variante",
     });
     setActionLoading(false);
-    if (created) router.push(`/campaigns/${created.id}`);
+    if (result && "campaign" in result) router.push(`/campaigns/${result.campaign.id}`);
+    else if (result?.error === "insufficient_org_credit") setDuplicateError("insufficient_org_credit");
+    else if (result?.error) setDuplicateError("failed");
   };
 
   const handleValidatePayouts = async () => {
@@ -330,6 +337,19 @@ export default function CampaignDetailPage() {
             >
               Créer variante A/B
             </button>
+          )}
+          {duplicateError === "insufficient_org_credit" && (
+            <p className="text-sm text-red-600 dark:text-red-400">
+              Crédit insuffisant.{" "}
+              <Link href="/" className="underline hover:no-underline">
+                Recharger (DEV)
+              </Link>
+            </p>
+          )}
+          {duplicateError === "failed" && (
+            <p className="text-sm text-red-600 dark:text-red-400">
+              Duplication impossible.
+            </p>
           )}
           <button
             type="button"
