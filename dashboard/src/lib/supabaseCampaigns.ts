@@ -336,3 +336,23 @@ export async function decideWithdrawal(
     amount_cents: obj?.amount_cents,
   };
 }
+
+/** Retrait dans l'historique (payé/refusé). */
+export interface RecentWithdrawalRow {
+  id: string;
+  user_id: string;
+  amount_cents: number;
+  status: string;
+  created_at: string;
+  decided_at: string | null;
+}
+
+/** Liste des retraits récents payés/refusés (RPC, org owner/editor). */
+export async function listRecentWithdrawals(limit = 50): Promise<RecentWithdrawalRow[]> {
+  const { data, error } = await supabase.rpc("list_recent_withdrawals", { _limit: limit });
+  if (error) {
+    if (process.env.NODE_ENV === "development") console.warn("[listRecentWithdrawals]", error.message);
+    return [];
+  }
+  return (data ?? []) as RecentWithdrawalRow[];
+}

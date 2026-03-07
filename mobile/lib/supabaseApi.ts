@@ -326,9 +326,13 @@ export async function validateCampaignPayouts(campaignId: string): Promise<{
 /** Entrée liste "Mes retraits" */
 export interface WithdrawalRow {
   id: string;
+  user_id: string;
   amount_cents: number;
   status: 'pending' | 'paid' | 'rejected';
+  method: string | null;
+  note: string | null;
   created_at: string;
+  decided_at: string | null;
 }
 
 /** Demande de retrait (RPC). Réserve le montant, crée withdrawal pending + ledger. */
@@ -356,7 +360,7 @@ export async function fetchMyWithdrawals(): Promise<WithdrawalRow[]> {
   if (!user) return [];
   const { data, error } = await supabase
     .from('withdrawals')
-    .select('id, amount_cents, status, created_at')
+    .select('id, user_id, amount_cents, status, method, note, created_at, decided_at')
     .eq('user_id', user.id)
     .order('created_at', { ascending: false })
     .limit(20);

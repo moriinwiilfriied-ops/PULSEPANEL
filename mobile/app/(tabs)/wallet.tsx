@@ -43,6 +43,16 @@ export default function WalletScreen() {
   const [myWithdrawals, setMyWithdrawals] = useState<WithdrawalRow[]>([]);
 
   const useServer = isSupabaseConfigured();
+
+  const formatWithdrawalDate = (createdAt: string, decidedAt: string | null): string => {
+    const d = decidedAt ? new Date(decidedAt) : new Date(createdAt);
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    const h = String(d.getHours()).padStart(2, '0');
+    const min = String(d.getMinutes()).padStart(2, '0');
+    return `${day}/${month}/${year} ${h}:${min}`;
+  };
   const pendingVal = useServer && serverWallet ? serverWallet.pendingCents / 100 : pending;
   const availableVal = useServer && serverWallet ? serverWallet.availableCents / 100 : available;
   const historyList = useServer && serverWallet ? serverWallet.history : history;
@@ -86,6 +96,15 @@ export default function WalletScreen() {
     setTimeout(() => setCopyFeedback(null), 2000);
   }, [lastCampaignId]);
 
+  const handleCopyUserId = useCallback(async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    const uid = user?.id;
+    if (!uid) return;
+    await Clipboard.setStringAsync(uid);
+    setCopyFeedback('Copié');
+    setTimeout(() => setCopyFeedback(null), 2000);
+  }, []);
+
   const handleSimulate = () => {
     if (useServer) {
       return;
@@ -101,25 +120,35 @@ export default function WalletScreen() {
   };
 
   const canWithdraw = useServer && availableVal >= 5 && !withdrawing;
+  const withdrawErrorFromApi = (message: string): string => {
+    if (message === 'minimum_500_cents') return 'Montant minimum: 5,00 €';
+    if (message === 'insufficient_balance') return 'Solde insuffisant';
+    return 'Impossible de demander le retrait. Réessayez.';
+  };
+
   const handleWithdraw = useCallback(async () => {
     if (!useServer || !canWithdraw) return;
     const amount = parseFloat(withdrawAmount.replace(',', '.'));
     if (Number.isNaN(amount) || amount < 5) {
-      setWithdrawError('Minimum 5,00 €');
+      setWithdrawError('Montant minimum: 5,00 €');
       return;
     }
     const amountCents = Math.round(amount * 100);
+    if (amountCents > Math.round(availableVal * 100)) {
+      setWithdrawError('Solde insuffisant');
+      return;
+    }
     setWithdrawError(null);
     setWithdrawing(true);
     const result = await requestWithdrawal(amountCents);
     setWithdrawing(false);
     if (result.error) {
-      setWithdrawError(result.error.message);
+      setWithdrawError(withdrawErrorFromApi(result.error.message));
       return;
     }
     setWithdrawAmount('5.00');
     await refreshWallet();
-  }, [useServer, canWithdraw, withdrawAmount, refreshWallet]);
+  }, [useServer, canWithdraw, withdrawAmount, availableVal, refreshWallet]);
 
   return (
     <ScrollView
@@ -139,6 +168,10 @@ export default function WalletScreen() {
           <Text style={styles.devIdentityLine} numberOfLines={1}>
             Supabase user_id: {supabaseUserId ?? '—'}
           </Text>
+          <TouchableOpacity style={styles.devCopyUserIdBtn} onPress={handleCopyUserId}>
+            <Text style={styles.devCopyUserIdBtnText}>Copier mon user_id</Text>
+          </TouchableOpacity>
+          {copyFeedback === 'Copié' ? <Text style={styles.devResult}>Copié</Text> : null}
           <View style={styles.sourceBadgeRow}>
             <Text style={styles.sourceBadgeLabel}>SOURCE: </Text>
             <View style={[styles.sourceBadge, sourceBadge === 'SB' ? styles.sourceBadgeSb : styles.sourceBadgeMock]}>
@@ -236,26 +269,35 @@ export default function WalletScreen() {
         )}
       </View>
 
-      {useServer && myWithdrawals.length > 0 && (
+      {useServer && (
         <>
           <Text style={styles.historyTitle}>Mes retraits</Text>
-          {myWithdrawals.map((w) => (
-            <View key={w.id} style={styles.historyRow}>
-              <View style={styles.historyLeft}>
-                <Text style={styles.historyQuestion}>{(w.amount_cents / 100).toFixed(2)} €</Text>
-                <Text style={styles.historyAnswer}>
-                  {w.status === 'pending' ? 'En attente' : w.status === 'paid' ? 'Payé' : 'Refusé'}
-                </Text>
-              </View>
-              <View style={styles.historyRight}>
-                <View style={[styles.badge, w.status === 'paid' ? styles.badgeOk : w.status === 'rejected' ? styles.badgeRejected : styles.badgePending]}>
-                  <Text style={styles.badgeText}>
-                    {w.status === 'pending' ? 'En attente' : w.status === 'paid' ? 'Payé' : 'Refusé'}
+          {myWithdrawals.length === 0 ? (
+            <Text style={styles.empty}>Aucun retrait pour l'instant.</Text>
+          ) : (
+            <View style={styles.withdrawalsListBlock}>
+            {myWithdrawals.map((w) => (
+              <View key={w.id} style={styles.historyRow}>
+                <View style={styles.historyLeft}>
+                  <Text style={styles.historyQuestion}>{(w.amount_cents / 100).toFixed(2)} €</Text>
+                  <Text style={styles.historyAnswer}>
+                    {formatWithdrawalDate(w.created_at, w.decided_at)}
                   </Text>
+                  {w.method ? (
+                    <Text style={styles.withdrawMethod}>Méthode: {w.method}</Text>
+                  ) : null}
+                </View>
+                <View style={styles.historyRight}>
+                  <View style={[styles.badge, w.status === 'paid' ? styles.badgeOk : w.status === 'rejected' ? styles.badgeRejected : styles.badgePending]}>
+                    <Text style={styles.badgeText}>
+                      {w.status === 'pending' ? 'En attente' : w.status === 'paid' ? 'Payé' : 'Refusé'}
+                    </Text>
+                  </View>
                 </View>
               </View>
+            ))}
             </View>
-          ))}
+          )}
         </>
       )}
 
@@ -311,6 +353,8 @@ const styles = StyleSheet.create({
   },
   devIdentityTitle: { fontSize: 11, fontWeight: '700', color: '#006688', marginBottom: 6 },
   devIdentityLine: { fontSize: 11, color: '#333', marginBottom: 4 },
+  devCopyUserIdBtn: { backgroundColor: '#006688', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8, alignSelf: 'flex-start', marginTop: 8 },
+  devCopyUserIdBtnText: { color: '#fff', fontSize: 12, fontWeight: '600' },
   sourceBadgeRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
   sourceBadgeLabel: { fontSize: 11, color: '#666', marginRight: 4 },
   sourceBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
@@ -410,4 +454,6 @@ const styles = StyleSheet.create({
   withdrawBtnText: { color: '#fff', fontWeight: '600' },
   withdrawError: { fontSize: 12, color: '#c62828', marginTop: 8 },
   withdrawHint: { fontSize: 12, color: '#666', marginTop: 6 },
+  withdrawMethod: { fontSize: 11, color: '#888', marginTop: 2 },
+  withdrawalsListBlock: { marginBottom: 24 },
 });
