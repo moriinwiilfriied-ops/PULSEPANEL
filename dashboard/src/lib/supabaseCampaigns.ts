@@ -296,3 +296,43 @@ export async function duplicateCampaign(campaignId: string): Promise<Campaign | 
   if (insertErr || !created) return null;
   return rowToCampaign(created as CampaignRow);
 }
+
+/** Retrait en attente (dashboard). */
+export interface PendingWithdrawalRow {
+  id: string;
+  user_id: string;
+  amount_cents: number;
+  status: string;
+  created_at: string;
+}
+
+/** Liste des retraits en attente (RPC, org owner/editor). */
+export async function listPendingWithdrawals(): Promise<PendingWithdrawalRow[]> {
+  const { data, error } = await supabase.rpc("list_pending_withdrawals");
+  if (error) {
+    if (process.env.NODE_ENV === "development") console.warn("[listPendingWithdrawals]", error.message);
+    return [];
+  }
+  return (data ?? []) as PendingWithdrawalRow[];
+}
+
+/** Décision sur un retrait : paid | rejected. */
+export async function decideWithdrawal(
+  withdrawalId: string,
+  decision: "paid" | "rejected"
+): Promise<{ error: Error | null; ok?: boolean; status?: string; user_id?: string; amount_cents?: number }> {
+  const { data, error } = await supabase.rpc("decide_withdrawal", {
+    _withdrawal_id: withdrawalId,
+    _decision: decision,
+  });
+  if (error) return { error };
+  const obj = data as { error?: string; ok?: boolean; status?: string; user_id?: string; amount_cents?: number } | null;
+  if (obj?.error) return { error: new Error(obj.error) };
+  return {
+    error: null,
+    ok: obj?.ok,
+    status: obj?.status,
+    user_id: obj?.user_id,
+    amount_cents: obj?.amount_cents,
+  };
+}

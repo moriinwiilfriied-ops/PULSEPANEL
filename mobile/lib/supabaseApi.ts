@@ -322,3 +322,47 @@ export async function validateCampaignPayouts(campaignId: string): Promise<{
     total_cents: obj?.total_cents,
   };
 }
+
+/** Entrée liste "Mes retraits" */
+export interface WithdrawalRow {
+  id: string;
+  amount_cents: number;
+  status: 'pending' | 'paid' | 'rejected';
+  created_at: string;
+}
+
+/** Demande de retrait (RPC). Réserve le montant, crée withdrawal pending + ledger. */
+export async function requestWithdrawal(amountCents: number): Promise<{
+  error: Error | null;
+  withdrawal_id?: string;
+  amount_cents?: number;
+  status?: string;
+}> {
+  const { data, error } = await supabase.rpc('request_withdrawal', { _amount_cents: amountCents });
+  if (error) return { error };
+  const obj = data as { error?: string; withdrawal_id?: string; amount_cents?: number; status?: string } | null;
+  if (obj?.error) return { error: new Error(obj.error) };
+  return {
+    error: null,
+    withdrawal_id: obj?.withdrawal_id,
+    amount_cents: obj?.amount_cents,
+    status: obj?.status,
+  };
+}
+
+/** Liste des 20 derniers retraits de l'utilisateur (RLS). */
+export async function fetchMyWithdrawals(): Promise<WithdrawalRow[]> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
+  const { data, error } = await supabase
+    .from('withdrawals')
+    .select('id, amount_cents, status, created_at')
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: false })
+    .limit(20);
+  if (error) {
+    if (__DEV__) console.warn('[Supabase] fetchMyWithdrawals', error.message);
+    return [];
+  }
+  return (data ?? []) as WithdrawalRow[];
+}

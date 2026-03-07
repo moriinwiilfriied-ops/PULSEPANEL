@@ -20,12 +20,20 @@ export default function Home() {
           <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">
             PulsePanel
           </h1>
-          <Link
-            href="/campaigns/new"
-            className="rounded-lg bg-zinc-900 dark:bg-zinc-100 px-4 py-2 text-sm font-medium text-white dark:text-zinc-900 hover:opacity-90"
-          >
-            Créer une campagne
-          </Link>
+          <nav className="flex items-center gap-4">
+            <Link
+              href="/withdrawals"
+              className="text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100"
+            >
+              Retraits
+            </Link>
+            <Link
+              href="/campaigns/new"
+              className="rounded-lg bg-zinc-900 dark:bg-zinc-100 px-4 py-2 text-sm font-medium text-white dark:text-zinc-900 hover:opacity-90"
+            >
+              Créer une campagne
+            </Link>
+          </nav>
         </div>
       </header>
 

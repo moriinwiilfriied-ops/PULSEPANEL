@@ -18,7 +18,7 @@ import { useFocusEffect } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 import { Text } from '@/components/Themed';
 import { useAppStore } from '@/store/useAppStore';
-import { isSupabaseConfigured, fetchWalletFromSupabase } from '@/lib/supabaseApi';
+import { isSupabaseConfigured, fetchWalletFromSupabase, requestWithdrawal, fetchMyWithdrawals, type WithdrawalRow } from '@/lib/supabaseApi';
 import { supabase } from '@/lib/supabase';
 
 export default function WalletScreen() {
@@ -37,6 +37,10 @@ export default function WalletScreen() {
   const [supabaseUserId, setSupabaseUserId] = useState<string | null>(null);
   const [sourceBadge, setSourceBadge] = useState<'SB' | 'MOCK'>('MOCK');
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
+  const [withdrawAmount, setWithdrawAmount] = useState('5.00');
+  const [withdrawing, setWithdrawing] = useState(false);
+  const [withdrawError, setWithdrawError] = useState<string | null>(null);
+  const [myWithdrawals, setMyWithdrawals] = useState<WithdrawalRow[]>([]);
 
   const useServer = isSupabaseConfigured();
   const pendingVal = useServer && serverWallet ? serverWallet.pendingCents / 100 : pending;
@@ -50,13 +54,17 @@ export default function WalletScreen() {
   const refreshWallet = useCallback(async () => {
     if (!useServer) return;
     setRefreshing(true);
-    const data = await fetchWalletFromSupabase();
+    const [data, withdrawals] = await Promise.all([
+      fetchWalletFromSupabase(),
+      fetchMyWithdrawals(),
+    ]);
     if (data) {
       setServerWallet(data);
       setSourceBadge('SB');
     } else {
       setSourceBadge('MOCK');
     }
+    setMyWithdrawals(withdrawals);
     const { data: { user } } = await supabase.auth.getUser();
     setSupabaseUserId(user?.id ?? null);
     setRefreshing(false);
@@ -91,6 +99,27 @@ export default function WalletScreen() {
       setDevAmount('');
     }
   };
+
+  const canWithdraw = useServer && availableVal >= 5 && !withdrawing;
+  const handleWithdraw = useCallback(async () => {
+    if (!useServer || !canWithdraw) return;
+    const amount = parseFloat(withdrawAmount.replace(',', '.'));
+    if (Number.isNaN(amount) || amount < 5) {
+      setWithdrawError('Minimum 5,00 €');
+      return;
+    }
+    const amountCents = Math.round(amount * 100);
+    setWithdrawError(null);
+    setWithdrawing(true);
+    const result = await requestWithdrawal(amountCents);
+    setWithdrawing(false);
+    if (result.error) {
+      setWithdrawError(result.error.message);
+      return;
+    }
+    setWithdrawAmount('5.00');
+    await refreshWallet();
+  }, [useServer, canWithdraw, withdrawAmount, refreshWallet]);
 
   return (
     <ScrollView
@@ -143,6 +172,33 @@ export default function WalletScreen() {
         <Text style={styles.totalValue}>{total.toFixed(2)} €</Text>
       </View>
 
+      {useServer && (
+        <View style={styles.withdrawSection}>
+          <Text style={styles.withdrawTitle}>Retirer</Text>
+          <TextInput
+            style={styles.withdrawInput}
+            value={withdrawAmount}
+            onChangeText={setWithdrawAmount}
+            placeholder="5.00"
+            placeholderTextColor="#888"
+            keyboardType="decimal-pad"
+          />
+          <TouchableOpacity
+            style={[styles.withdrawBtn, (!canWithdraw || withdrawing) && styles.withdrawBtnDisabled]}
+            onPress={handleWithdraw}
+            disabled={!canWithdraw || withdrawing}
+          >
+            <Text style={styles.withdrawBtnText}>
+              {withdrawing ? 'Envoi…' : 'Demander un retrait'}
+            </Text>
+          </TouchableOpacity>
+          {withdrawError ? <Text style={styles.withdrawError}>{withdrawError}</Text> : null}
+          {useServer && availableVal < 5 && availableVal > 0 && (
+            <Text style={styles.withdrawHint}>Disponible &lt; 5 € : retrait désactivé.</Text>
+          )}
+        </View>
+      )}
+
       <View style={styles.devSection}>
         <Text style={styles.devTitle}>
           DEV — {useServer ? 'Validation = dashboard' : 'Simuler validation'}
@@ -179,6 +235,29 @@ export default function WalletScreen() {
           </>
         )}
       </View>
+
+      {useServer && myWithdrawals.length > 0 && (
+        <>
+          <Text style={styles.historyTitle}>Mes retraits</Text>
+          {myWithdrawals.map((w) => (
+            <View key={w.id} style={styles.historyRow}>
+              <View style={styles.historyLeft}>
+                <Text style={styles.historyQuestion}>{(w.amount_cents / 100).toFixed(2)} €</Text>
+                <Text style={styles.historyAnswer}>
+                  {w.status === 'pending' ? 'En attente' : w.status === 'paid' ? 'Payé' : 'Refusé'}
+                </Text>
+              </View>
+              <View style={styles.historyRight}>
+                <View style={[styles.badge, w.status === 'paid' ? styles.badgeOk : w.status === 'rejected' ? styles.badgeRejected : styles.badgePending]}>
+                  <Text style={styles.badgeText}>
+                    {w.status === 'pending' ? 'En attente' : w.status === 'paid' ? 'Payé' : 'Refusé'}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          ))}
+        </>
+      )}
 
       <Text style={styles.historyTitle}>Historique</Text>
       {historyList.length === 0 ? (
@@ -307,5 +386,28 @@ const styles = StyleSheet.create({
   badge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
   badgePending: { backgroundColor: '#fff3cd' },
   badgeOk: { backgroundColor: '#d4edda' },
+  badgeRejected: { backgroundColor: '#f8d7da' },
   badgeText: { fontSize: 11, fontWeight: '600' },
+  withdrawSection: {
+    backgroundColor: '#f0f8f0',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: '#c8e6c9',
+  },
+  withdrawTitle: { fontSize: 16, fontWeight: '600', marginBottom: 8 },
+  withdrawInput: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+    fontSize: 16,
+  },
+  withdrawBtn: { backgroundColor: '#2e7d32', paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
+  withdrawBtnDisabled: { opacity: 0.5 },
+  withdrawBtnText: { color: '#fff', fontWeight: '600' },
+  withdrawError: { fontSize: 12, color: '#c62828', marginTop: 8 },
+  withdrawHint: { fontSize: 12, color: '#666', marginTop: 6 },
 });
