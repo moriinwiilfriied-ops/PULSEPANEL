@@ -3,7 +3,7 @@
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { getCampaignStats, updateCampaignStatus, duplicateCampaign, validateCampaignPayouts } from "@/src/lib/supabaseCampaigns";
+import { getCampaignStats, getCampaignQualityStats, updateCampaignStatus, duplicateCampaign, validateCampaignPayouts } from "@/src/lib/supabaseCampaigns";
 import { supabase, getOrgMembership } from "@/src/lib/supabase";
 
 type Stats = Awaited<ReturnType<typeof getCampaignStats>>;
@@ -26,10 +26,12 @@ export default function CampaignDetailPage() {
     orgId: null,
     role: null,
   });
+  const [qualityStats, setQualityStats] = useState<Awaited<ReturnType<typeof getCampaignQualityStats>>>(null);
 
   const loadStats = () => {
     setLoading(true);
     getCampaignStats(id).then(setStats).finally(() => setLoading(false));
+    getCampaignQualityStats(id).then(setQualityStats);
   };
 
   useEffect(() => {
@@ -269,6 +271,29 @@ export default function CampaignDetailPage() {
             </p>
           </div>
         </div>
+
+        {qualityStats ? (
+          <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
+            <h3 className="text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-3">
+              Qualité
+            </h3>
+            <ul className="space-y-1 text-sm text-zinc-600 dark:text-zinc-400">
+              <li>Qualité: {qualityStats.pct_valid}% valides</li>
+              <li>Trop rapide: {qualityStats.pct_too_fast}%</li>
+              <li>Vides: {qualityStats.pct_empty}%</li>
+            </ul>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
+            <h3 className="text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-3">
+              Qualité
+            </h3>
+            <p className="text-sm text-zinc-500 dark:text-zinc-400">Qualité indisponible</p>
+            {process.env.NODE_ENV === "development" && (
+              <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">DEV: RPC ou vue non disponible / pas encore de réponses</p>
+            )}
+          </div>
+        )}
 
         {Object.keys(distribution).length > 0 && (
           <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">

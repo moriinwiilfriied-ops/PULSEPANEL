@@ -75,6 +75,36 @@ export async function getCampaigns(): Promise<Campaign[]> {
   return (data as CampaignRow[]).map(rowToCampaign);
 }
 
+/** Stats qualité campagne (RPC get_campaign_quality_stats). null si indisponible ou non autorisé. */
+export async function getCampaignQualityStats(campaignId: string): Promise<{
+  total_responses: number;
+  valid_responses: number;
+  invalid_responses: number;
+  pct_valid: number;
+  pct_too_fast: number;
+  pct_empty: number;
+} | null> {
+  const { data, error } = await supabase.rpc("get_campaign_quality_stats", {
+    _campaign_id: campaignId,
+  });
+  if (error) {
+    if (process.env.NODE_ENV === "development") {
+      console.warn("[getCampaignQualityStats]", error.message);
+    }
+    return null;
+  }
+  if (data == null || typeof data !== "object") return null;
+  const row = data as Record<string, unknown>;
+  return {
+    total_responses: Number(row.total_responses ?? 0),
+    valid_responses: Number(row.valid_responses ?? 0),
+    invalid_responses: Number(row.invalid_responses ?? 0),
+    pct_valid: Number(row.pct_valid ?? 0),
+    pct_too_fast: Number(row.pct_too_fast ?? 0),
+    pct_empty: Number(row.pct_empty ?? 0),
+  };
+}
+
 /** Détail + stats + réponses : Supabase avec fallback mock. */
 export async function getCampaignStats(campaignId: string): Promise<{
   campaign: Campaign;

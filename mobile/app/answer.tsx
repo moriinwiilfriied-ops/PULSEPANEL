@@ -40,6 +40,7 @@ export default function AnswerScreen() {
   const [textAnswer, setTextAnswer] = useState('');
   const [step, setStep] = useState<'form' | 'reward'>('form');
   const [rewardAmount, setRewardAmount] = useState(0);
+  const [answerStartedAt, setAnswerStartedAt] = useState<number | null>(null);
 
   useEffect(() => {
     if (!questionId || question) return;
@@ -63,6 +64,10 @@ export default function AnswerScreen() {
       setLoading(false);
     })();
   }, [questionId, question]);
+
+  useEffect(() => {
+    if (question && step === 'form') setAnswerStartedAt((t) => (t == null ? Date.now() : t));
+  }, [question?.id, step]);
 
   if (loading) {
     return (
@@ -93,17 +98,19 @@ export default function AnswerScreen() {
       return;
     }
     const isSupabase = /^[0-9a-f-]{36}$/i.test(question.id);
+    const durationMs = answerStartedAt != null ? Math.round(Date.now() - answerStartedAt) : undefined;
     if (isSupabase) {
-      const { error } = await submitResponseToSupabase({
+      const { error, reward } = await submitResponseToSupabase({
         campaignId: question.id,
         question: question.question,
         answer,
+        durationMs,
         rewardCents: Math.round(question.reward * 100),
       });
       if (error) {
         return;
       }
-      setRewardAmount(question.reward);
+      setRewardAmount(reward ?? question.reward);
       setStep('reward');
       return;
     }
