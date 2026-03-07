@@ -105,6 +105,29 @@ export async function getCampaignQualityStats(campaignId: string): Promise<{
   };
 }
 
+/** Ligne export réponses campagne (RPC export_campaign_responses). */
+export interface ExportCampaignResponseRow {
+  created_at: string;
+  response_id: string;
+  user_id: string;
+  answer: Record<string, unknown> | unknown;
+  reward_cents: number;
+  payout_status: string;
+  is_valid: boolean;
+  duration_ms: number | null;
+}
+
+/** Export des réponses d'une campagne (org owner/editor). Erreur si non autorisé. */
+export async function exportCampaignResponses(
+  campaignId: string
+): Promise<{ data: ExportCampaignResponseRow[] | null; error: Error | null }> {
+  const { data, error } = await supabase.rpc("export_campaign_responses", {
+    _campaign_id: campaignId,
+  });
+  if (error) return { data: null, error };
+  return { data: (data ?? []) as ExportCampaignResponseRow[], error: null };
+}
+
 /** Détail + stats + réponses : Supabase avec fallback mock. */
 export async function getCampaignStats(campaignId: string): Promise<{
   campaign: Campaign;

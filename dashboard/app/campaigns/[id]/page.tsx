@@ -3,7 +3,7 @@
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { getCampaignStats, getCampaignQualityStats, updateCampaignStatus, duplicateCampaign, validateCampaignPayouts } from "@/src/lib/supabaseCampaigns";
+import { getCampaignStats, getCampaignQualityStats, updateCampaignStatus, duplicateCampaign, validateCampaignPayouts, exportCampaignResponses, type ExportCampaignResponseRow } from "@/src/lib/supabaseCampaigns";
 import { supabase, getOrgMembership } from "@/src/lib/supabase";
 
 type Stats = Awaited<ReturnType<typeof getCampaignStats>>;
@@ -27,6 +27,9 @@ export default function CampaignDetailPage() {
     role: null,
   });
   const [qualityStats, setQualityStats] = useState<Awaited<ReturnType<typeof getCampaignQualityStats>>>(null);
+  const [exportToast, setExportToast] = useState<"csv" | "json" | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [exportLoading, setExportLoading] = useState(false);
 
   const loadStats = () => {
     setLoading(true);
@@ -94,6 +97,77 @@ export default function CampaignDetailPage() {
     loadStats();
   };
 
+  const exportErrorToMessage = (err: Error): string => {
+    const msg = (err.message ?? "").toLowerCase();
+    if (msg.includes("forbidden")) return "Vous n'êtes pas autorisé.";
+    if (msg.includes("not_authenticated") || msg.includes("jwt")) return "Connectez-vous.";
+    return "Export impossible.";
+  };
+
+  const downloadJson = (data: ExportCampaignResponseRow[], filename: string) => {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const downloadCsv = (data: ExportCampaignResponseRow[], filename: string) => {
+    const escape = (v: string) => {
+      const s = String(v);
+      if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+      return s;
+    };
+    const headers = ["created_at", "response_id", "user_id", "answer", "reward_cents", "payout_status", "is_valid", "duration_ms"];
+    const rows = data.map((r) =>
+      headers.map((h) => {
+        const val = r[h as keyof ExportCampaignResponseRow];
+        if (h === "answer") return escape(JSON.stringify(val ?? ""));
+        return escape(val == null ? "" : String(val));
+      }).join(",")
+    );
+    const csv = [headers.join(","), ...rows].join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportCsv = async () => {
+    setExportError(null);
+    setExportLoading(true);
+    const { data: rows, error } = await exportCampaignResponses(id);
+    setExportLoading(false);
+    if (error) {
+      setExportError(exportErrorToMessage(error));
+      return;
+    }
+    const base = (stats?.campaign?.name ?? "campaign").replace(/[^\w\s-]/g, "").slice(0, 40) || "export";
+    downloadCsv(rows ?? [], `${base}_responses.csv`);
+    setExportToast("csv");
+    setTimeout(() => setExportToast(null), 3000);
+  };
+
+  const handleExportJson = async () => {
+    setExportError(null);
+    setExportLoading(true);
+    const { data: rows, error } = await exportCampaignResponses(id);
+    setExportLoading(false);
+    if (error) {
+      setExportError(exportErrorToMessage(error));
+      return;
+    }
+    const base = (stats?.campaign?.name ?? "campaign").replace(/[^\w\s-]/g, "").slice(0, 40) || "export";
+    downloadJson(rows ?? [], `${base}_responses.json`);
+    setExportToast("json");
+    setTimeout(() => setExportToast(null), 3000);
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 flex items-center justify-center">
@@ -153,6 +227,18 @@ export default function CampaignDetailPage() {
         {validateError && (
           <div className="rounded-xl border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/30 p-4">
             <p className="text-sm font-medium text-red-800 dark:text-red-200">{validateError}</p>
+          </div>
+        )}
+
+        {exportError && (
+          <div className="rounded-xl border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/30 p-4">
+            <p className="text-sm font-medium text-red-800 dark:text-red-200">{exportError}</p>
+          </div>
+        )}
+
+        {exportToast && (
+          <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 px-4 py-3 text-sm font-medium text-emerald-800 dark:text-emerald-200">
+            {exportToast === "csv" ? "Export CSV généré." : "Export JSON généré."}
           </div>
         )}
 
@@ -224,6 +310,22 @@ export default function CampaignDetailPage() {
             className="rounded-lg border border-zinc-300 dark:border-zinc-600 text-zinc-700 dark:text-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-50"
           >
             Dupliquer
+          </button>
+          <button
+            type="button"
+            onClick={handleExportCsv}
+            disabled={exportLoading}
+            className="rounded-lg border border-zinc-300 dark:border-zinc-600 text-zinc-700 dark:text-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-50"
+          >
+            Exporter CSV
+          </button>
+          <button
+            type="button"
+            onClick={handleExportJson}
+            disabled={exportLoading}
+            className="rounded-lg border border-zinc-300 dark:border-zinc-600 text-zinc-700 dark:text-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-50"
+          >
+            Exporter JSON
           </button>
         </div>
 
