@@ -1,11 +1,13 @@
 import 'react-native-url-polyfill/auto';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { useFonts } from 'expo-font';
-import { Stack } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
 import 'react-native-reanimated';
-import { ensureAnonSession } from '@/lib/supabase';
+import { ensureAnonSession, supabase } from '@/lib/supabase';
+import { isSupabaseConfigured } from '@/lib/supabaseApi';
+import { getAppStore } from '@/store/useAppStore';
 
 import { useColorScheme } from '@/components/useColorScheme';
 
@@ -22,6 +24,14 @@ export const unstable_settings = {
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
 
+function parseAgeFromBucket(ageBucket: string | null): number | null {
+  if (!ageBucket) return null;
+  const s = ageBucket.trim();
+  if (s === '45+') return 45;
+  const m = s.match(/^(\d+)/);
+  return m ? parseInt(m[1], 10) || null : null;
+}
+
 export default function RootLayout() {
   const [loaded, error] = useFonts({
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
@@ -37,10 +47,6 @@ export default function RootLayout() {
     }
   }, [loaded]);
 
-  useEffect(() => {
-    ensureAnonSession();
-  }, []);
-
   if (!loaded) {
     return null;
   }
@@ -50,6 +56,34 @@ export default function RootLayout() {
 
 function RootLayoutNav() {
   const colorScheme = useColorScheme();
+  const router = useRouter();
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      await ensureAnonSession();
+      if (cancelled || !isSupabaseConfigured()) return;
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user?.id || cancelled) return;
+      const { data: row } = await supabase
+        .from('users')
+        .select('age_bucket, region, tags, onboarding_completed')
+        .eq('id', user.id)
+        .maybeSingle();
+      if (cancelled || !row?.onboarding_completed) return;
+      const store = getAppStore();
+      store.setOnboarding(
+        parseAgeFromBucket(row.age_bucket ?? null),
+        row.region ?? null,
+        Array.isArray(row.tags) ? (row.tags as string[]) : []
+      );
+      store.completeOnboarding();
+      router.replace('/(tabs)/feed');
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
 
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>

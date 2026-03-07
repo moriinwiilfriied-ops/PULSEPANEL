@@ -17,7 +17,7 @@ import { useAppStore } from '@/store/useAppStore';
 import { Text } from '@/components/Themed';
 import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
-import { upsertUserOnboarding } from '@/lib/supabaseApi';
+import { isSupabaseConfigured, upsertUserOnboarding } from '@/lib/supabaseApi';
 
 const REGIONS = ['Île-de-France', 'Provence-Alpes-Côte d\'Azur', 'Auvergne-Rhône-Alpes', 'Occitanie', 'Autre'];
 const TAGS = ['Tech', 'Mode', 'Alimentation', 'Sport', 'Voyage', 'Culture', 'Santé', 'Finance'];
@@ -50,7 +50,7 @@ export default function OnboardingScreen() {
     setOnboarding(a, regionVal || null, selectedTags);
     completeOnboarding();
     const ageBucket = a < 25 ? '18-24' : a < 35 ? '25-34' : a < 45 ? '35-44' : '45+';
-    if (process.env.EXPO_PUBLIC_SUPABASE_URL) {
+    if (isSupabaseConfigured()) {
       await upsertUserOnboarding({ ageBucket, region: regionVal || null, tags: selectedTags });
     }
     router.replace('/(tabs)/feed');
