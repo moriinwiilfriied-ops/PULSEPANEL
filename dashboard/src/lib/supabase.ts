@@ -88,6 +88,34 @@ export interface OrgBalance {
   spent_cents: number;
 }
 
+export interface OrgLedgerRow {
+  created_at: string;
+  amount_cents: number;
+  reason: string | null;
+  campaign_id: string | null;
+}
+
+/**
+ * Liste les mouvements du ledger org (via RPC sécurisée). Erreur si non authentifié ou pas droit sur l'org.
+ */
+export async function listOrgLedger(
+  orgId: string,
+  limit = 100
+): Promise<{ data?: OrgLedgerRow[]; error?: string }> {
+  const { data, error } = await supabase.rpc('list_org_ledger', {
+    _org_id: orgId,
+    _limit: limit,
+  });
+  if (error) {
+    const msg = error.message ?? '';
+    if (msg.includes('forbidden')) return { error: 'Vous n\'êtes pas autorisé.' };
+    if (msg.includes('not_authenticated') || msg.includes('jwt')) return { error: 'Connectez-vous.' };
+    return { error: 'Impossible de charger la facturation.' };
+  }
+  const rows = (data ?? []) as OrgLedgerRow[];
+  return { data: rows };
+}
+
 /**
  * Solde du wallet entreprise (org). null si pas membre ou erreur.
  */
