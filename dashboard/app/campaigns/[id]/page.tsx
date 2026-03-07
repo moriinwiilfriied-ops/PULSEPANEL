@@ -1,21 +1,42 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { getCampaignStats } from "@/src/lib/supabaseCampaigns";
+import { getCampaignStats, updateCampaignStatus, duplicateCampaign } from "@/src/lib/supabaseCampaigns";
 
 type Stats = Awaited<ReturnType<typeof getCampaignStats>>;
 
 export default function CampaignDetailPage() {
   const params = useParams();
+  const router = useRouter();
   const id = params.id as string;
   const [stats, setStats] = useState<Stats>(null);
   const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState(false);
+
+  const loadStats = () => {
+    setLoading(true);
+    getCampaignStats(id).then(setStats).finally(() => setLoading(false));
+  };
 
   useEffect(() => {
-    getCampaignStats(id).then(setStats).finally(() => setLoading(false));
+    loadStats();
   }, [id]);
+
+  const handleStatus = async (status: "active" | "paused" | "completed") => {
+    setActionLoading(true);
+    const { error } = await updateCampaignStatus(id, status);
+    setActionLoading(false);
+    if (!error) loadStats();
+  };
+
+  const handleDuplicate = async () => {
+    setActionLoading(true);
+    const created = await duplicateCampaign(id);
+    setActionLoading(false);
+    if (created) router.push(`/campaigns/${created.id}`);
+  };
 
   if (loading) {
     return (
@@ -57,8 +78,16 @@ export default function CampaignDetailPage() {
 
       <main className="mx-auto max-w-4xl px-6 py-8 space-y-8">
         <div className="flex flex-wrap items-center gap-3">
-          <span className="rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300 px-2.5 py-0.5 text-xs font-medium">
-            {campaign.status}
+          <span
+            className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
+              campaign.status === "active"
+                ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
+                : campaign.status === "paused"
+                  ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                  : "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
+            }`}
+          >
+            {campaign.status === "active" ? "Actif" : campaign.status === "paused" ? "En pause" : "Terminée"}
           </span>
           <span className="rounded-full bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-300 px-2.5 py-0.5 text-xs font-medium">
             {campaign.template}
@@ -66,6 +95,47 @@ export default function CampaignDetailPage() {
           <span className="rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300 px-2.5 py-0.5 text-xs font-medium">
             Qualité {qualityBadge}
           </span>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          {campaign.status === "active" && (
+            <button
+              type="button"
+              onClick={() => handleStatus("paused")}
+              disabled={actionLoading}
+              className="rounded-lg border border-amber-500 text-amber-700 dark:text-amber-400 px-4 py-2 text-sm font-medium hover:bg-amber-50 dark:hover:bg-amber-900/20 disabled:opacity-50"
+            >
+              Pause
+            </button>
+          )}
+          {campaign.status === "paused" && (
+            <>
+              <button
+                type="button"
+                onClick={() => handleStatus("active")}
+                disabled={actionLoading}
+                className="rounded-lg bg-emerald-600 text-white px-4 py-2 text-sm font-medium hover:bg-emerald-700 disabled:opacity-50"
+              >
+                Reprendre
+              </button>
+              <button
+                type="button"
+                onClick={() => handleStatus("completed")}
+                disabled={actionLoading}
+                className="rounded-lg border border-zinc-400 text-zinc-700 dark:text-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50"
+              >
+                Terminer
+              </button>
+            </>
+          )}
+          <button
+            type="button"
+            onClick={handleDuplicate}
+            disabled={actionLoading}
+            className="rounded-lg border border-zinc-300 dark:border-zinc-600 text-zinc-700 dark:text-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-50"
+          >
+            Dupliquer
+          </button>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

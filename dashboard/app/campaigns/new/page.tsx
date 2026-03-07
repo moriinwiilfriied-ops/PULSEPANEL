@@ -37,6 +37,7 @@ export default function NewCampaignPage() {
   const [tags, setTags] = useState<string[]>([]);
   const [quota, setQuota] = useState(100);
   const [rewardUser, setRewardUser] = useState(0.2);
+  const [questionError, setQuestionError] = useState("");
 
   const pricePerResponse = calcPricePerResponse(rewardUser);
   const total = Math.round(quota * pricePerResponse * 100) / 100;
@@ -58,6 +59,12 @@ export default function NewCampaignPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setQuestionError("");
+    const questionTrimmed = question.trim();
+    if (!questionTrimmed) {
+      setQuestionError("La question est obligatoire.");
+      return;
+    }
     const options = optionsText
       .split("\n")
       .map((s) => s.trim())
@@ -71,7 +78,7 @@ export default function NewCampaignPage() {
     const campaign = await createCampaign({
       name: name || "Sans titre",
       template,
-      question: question || "Question",
+      question: questionTrimmed,
       options: options.length ? options : ["Oui", "Non"],
       targeting,
       quota,
@@ -135,15 +142,20 @@ export default function NewCampaignPage() {
 
           <div>
             <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">
-              Question
+              Question <span className="text-red-500">*</span>
             </label>
             <input
               type="text"
               value={question}
-              onChange={(e) => setQuestion(e.target.value)}
-              className="w-full rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-4 py-2 text-zinc-900 dark:text-zinc-100"
+              onChange={(e) => { setQuestion(e.target.value); setQuestionError(""); }}
+              className={`w-full rounded-lg border bg-white dark:bg-zinc-900 px-4 py-2 text-zinc-900 dark:text-zinc-100 ${
+                questionError ? "border-red-500" : "border-zinc-300 dark:border-zinc-600"
+              }`}
               placeholder="Ex: Quelle option préférez-vous ?"
             />
+            {questionError && (
+              <p className="mt-1 text-sm text-red-600 dark:text-red-400">{questionError}</p>
+            )}
           </div>
 
           <div>

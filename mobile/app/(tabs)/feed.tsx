@@ -3,13 +3,14 @@
  * Sur Accepter → ouvre bottom sheet Answer.
  */
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   StyleSheet,
   View,
   TouchableOpacity,
   Dimensions,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text } from '@/components/Themed';
@@ -36,18 +37,35 @@ export default function FeedScreen() {
       router.replace('/onboarding');
       return;
     }
-    let cancelled = false;
+  }, [completed]);
+
+  const loadQuestions = useCallback(() => {
+    if (!completed) return;
     (async () => {
       const fromSupabase = await getFeedQuestions();
-      if (cancelled) return;
       if (fromSupabase.length > 0) {
         setQuestions(fromSupabase);
         return;
       }
       setQuestions(getAvailableQuestions());
     })();
-    return () => { cancelled = true; };
   }, [completed]);
+
+  useEffect(() => {
+    loadQuestions();
+  }, [loadQuestions]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (completed) loadQuestions();
+    }, [completed, loadQuestions])
+  );
+
+  useEffect(() => {
+    if (questions.length > 0 && currentIndex >= questions.length) {
+      setCurrentIndex(0);
+    }
+  }, [questions.length, currentIndex]);
 
   const current = questions[currentIndex];
 
@@ -79,7 +97,8 @@ export default function FeedScreen() {
     );
   }
 
-  const cardBg = colorScheme === 'dark' ? 'rgba(255,255,255,0.08)' : '#fff';
+  const cardBgTop = colorScheme === 'dark' ? 'rgba(18,18,18,0.92)' : 'rgba(255,255,255,0.95)';
+  const cardBgBehind = colorScheme === 'dark' ? 'rgba(18,18,18,0.4)' : 'rgba(255,255,255,0.5)';
   const cardBorder = colorScheme === 'dark' ? 'rgba(255,255,255,0.2)' : '#eee';
   const textColor = colors.text;
   const mutedColor = colors.tabIconDefault;
@@ -94,7 +113,12 @@ export default function FeedScreen() {
             key={q.id}
             style={[
               styles.card,
-              { backgroundColor: cardBg, borderColor: cardBorder },
+              {
+                backgroundColor: i === 0 ? cardBgTop : cardBgBehind,
+                borderColor: cardBorder,
+                overflow: 'hidden',
+                backfaceVisibility: 'hidden',
+              },
               i === 0 ? styles.cardTop : styles.cardBehind,
             ]}
           >
@@ -108,10 +132,18 @@ export default function FeedScreen() {
                 <Text style={styles.badgeText}>{q.source === 'supabase' ? 'SB' : 'MOCK'}</Text>
               </View>
             </View>
-            <Text style={[styles.cardQuestion, { color: textColor }]} numberOfLines={2} ellipsizeMode="tail">
+            <Text
+              style={[
+                styles.cardQuestion,
+                { color: textColor },
+                i !== 0 && styles.cardBehindText,
+              ]}
+              numberOfLines={2}
+              ellipsizeMode="tail"
+            >
               {q.questionText || 'Question (à définir)'}
             </Text>
-            <View style={styles.cardMeta}>
+            <View style={[styles.cardMeta, i !== 0 && styles.cardBehindText]}>
               <Text style={[styles.cardType, { color: mutedColor }]}>{q.type}</Text>
               <Text style={styles.cardReward}>+{q.reward.toFixed(2)} €</Text>
               <Text style={[styles.cardEta, { color: mutedColor }]}>~{q.etaSeconds}s</Text>
@@ -151,7 +183,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   cardTop: { zIndex: 2 },
-  cardBehind: { zIndex: 1, transform: [{ scale: 0.96 }], opacity: 0.8 },
+  cardBehind: { zIndex: 1, transform: [{ scale: 0.96 }], opacity: 0.25 },
+  cardBehindText: { opacity: 0 },
   imagePlaceholder: {
     height: 120,
     borderRadius: 12,

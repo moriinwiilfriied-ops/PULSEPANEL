@@ -28,6 +28,7 @@ export interface CampaignRow {
   price_cents: number;
   status: string;
   created_at: string;
+  responses_count?: number;
 }
 
 function rowToCampaign(row: CampaignRow): Campaign {
@@ -50,7 +51,8 @@ function rowToCampaign(row: CampaignRow): Campaign {
     pricePerResponse: row.price_cents / 100,
     total: (row.quota * row.price_cents) / 100,
     createdAt: row.created_at,
-    status: (row.status as Campaign["status"]) ?? "live",
+    status: (row.status as Campaign["status"]) ?? "active",
+    responsesCount: row.responses_count ?? 0,
   };
 }
 
@@ -62,7 +64,7 @@ export async function getCampaigns(): Promise<Campaign[]> {
   }
   const { data, error } = await supabase
     .from("campaigns")
-    .select("id, org_id, name, template, question, options, targeting, quota, reward_cents, price_cents, status, created_at")
+    .select("id, org_id, name, template, question, options, targeting, quota, reward_cents, price_cents, status, created_at, responses_count")
     .eq("org_id", orgId)
     .order("created_at", { ascending: false });
   if (error) {
@@ -85,7 +87,7 @@ export async function getCampaignStats(campaignId: string): Promise<{
 } | null> {
   const { data: campaignRow, error: campError } = await supabase
     .from("campaigns")
-    .select("id, org_id, name, template, question, options, targeting, quota, reward_cents, price_cents, status, created_at")
+    .select("id, org_id, name, template, question, options, targeting, quota, reward_cents, price_cents, status, created_at, responses_count")
     .eq("id", campaignId)
     .single();
   if (campError || !campaignRow) {
@@ -110,7 +112,7 @@ export async function getCampaignStats(campaignId: string): Promise<{
     trustLevel: 75,
     at: r.created_at,
   }));
-  const responsesCount = verbatims.length;
+  const responsesCount = campaign.responsesCount ?? verbatims.length;
   const distribution: Record<string, number> = {};
   verbatims.forEach((v) => {
     distribution[v.answer] = (distribution[v.answer] ?? 0) + 1;
@@ -183,4 +185,46 @@ export async function createCampaign(params: {
     });
   }
   return rowToCampaign(data as CampaignRow);
+}
+
+/** Pause / Reprendre / Terminer : met à jour le status. */
+export async function updateCampaignStatus(
+  campaignId: string,
+  status: "active" | "paused" | "completed"
+): Promise<{ error: Error | null }> {
+  const { error } = await supabase
+    .from("campaigns")
+    .update({ status })
+    .eq("id", campaignId);
+  return { error: error ?? null };
+}
+
+/** Dupliquer une campagne (même org, status active, responses_count 0). */
+export async function duplicateCampaign(campaignId: string): Promise<Campaign | null> {
+  const orgId = await getCurrentOrgId();
+  if (!orgId) return null;
+  const { data: source, error: fetchErr } = await supabase
+    .from("campaigns")
+    .select("name, template, question, options, targeting, quota, reward_cents, price_cents")
+    .eq("id", campaignId)
+    .single();
+  if (fetchErr || !source) return null;
+  const { data: created, error: insertErr } = await supabase
+    .from("campaigns")
+    .insert({
+      org_id: orgId,
+      name: (source.name ?? "Copie") + " (copie)",
+      template: source.template,
+      question: source.question,
+      options: source.options,
+      targeting: source.targeting,
+      quota: source.quota,
+      reward_cents: source.reward_cents,
+      price_cents: source.price_cents,
+      status: "active",
+    })
+    .select("id, org_id, name, template, question, options, targeting, quota, reward_cents, price_cents, status, created_at, responses_count")
+    .single();
+  if (insertErr || !created) return null;
+  return rowToCampaign(created as CampaignRow);
 }

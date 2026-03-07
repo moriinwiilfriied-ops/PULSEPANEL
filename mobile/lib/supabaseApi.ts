@@ -49,21 +49,23 @@ export interface CampaignRow {
   price_cents: number;
   status: string;
   created_at: string;
+  responses_count?: number;
 }
 
-/** Fetch campaigns actives (limit 20). Retourne [] en cas d'erreur. */
+/** Fetch campaigns actives avec progress < quota (limit 20). Retourne [] en cas d'erreur. */
 export async function fetchActiveCampaigns(): Promise<CampaignRow[]> {
   const { data, error } = await supabase
     .from('campaigns')
-    .select('id, name, template, question, options, targeting, quota, reward_cents, price_cents, status, created_at')
+    .select('id, name, template, question, options, targeting, quota, reward_cents, price_cents, status, created_at, responses_count')
     .eq('status', 'active')
     .order('created_at', { ascending: false })
-    .limit(20);
+    .limit(50);
   if (error) {
     console.warn('[Supabase] fetchActiveCampaigns', error.message);
     return [];
   }
-  return (data ?? []) as CampaignRow[];
+  const rows = (data ?? []) as CampaignRow[];
+  return rows.filter((c) => (c.responses_count ?? 0) < c.quota).slice(0, 20);
 }
 
 /** Une campagne par ID (pour l'écran Answer). */

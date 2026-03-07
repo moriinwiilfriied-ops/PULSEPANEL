@@ -24,7 +24,9 @@ export interface Campaign {
   pricePerResponse: number;
   total: number;
   createdAt: string; // ISO
-  status: 'draft' | 'live' | 'paused';
+  status: 'active' | 'paused' | 'completed';
+  /** Pour la liste (depuis DB responses_count). */
+  responsesCount?: number;
 }
 
 export interface CampaignResponse {
@@ -50,7 +52,7 @@ const campaigns: Campaign[] = [
     pricePerResponse: 0.78,
     total: 156,
     createdAt: '2025-02-01T10:00:00Z',
-    status: 'live',
+    status: 'active',
   },
   {
     id: 'c2',
@@ -64,7 +66,7 @@ const campaigns: Campaign[] = [
     pricePerResponse: 0.61,
     total: 61,
     createdAt: '2025-02-10T14:00:00Z',
-    status: 'live',
+    status: 'active',
   },
 ];
 
@@ -106,7 +108,7 @@ export function addCampaign(c: Omit<Campaign, 'id' | 'createdAt' | 'pricePerResp
     createdAt: new Date().toISOString(),
     pricePerResponse,
     total,
-    status: 'live',
+    status: 'active',
   };
   campaigns.push(campaign);
   responsesByCampaign[campaign.id] = [];
