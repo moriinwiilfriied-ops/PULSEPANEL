@@ -68,6 +68,16 @@ export default function CampaignDetailPage() {
     if (created) router.push(`/campaigns/${created.id}`);
   };
 
+  const handleDuplicateVariant = async () => {
+    setActionLoading(true);
+    const created = await duplicateCampaign(id, {
+      nameSuffix: " — variante A/B",
+      question: "Variante",
+    });
+    setActionLoading(false);
+    if (created) router.push(`/campaigns/${created.id}`);
+  };
+
   const handleValidatePayouts = async () => {
     setActionLoading(true);
     setValidateResult(null);
@@ -311,6 +321,16 @@ export default function CampaignDetailPage() {
           >
             Dupliquer
           </button>
+          {campaign.templateKey && (
+            <button
+              type="button"
+              onClick={handleDuplicateVariant}
+              disabled={actionLoading}
+              className="rounded-lg border border-zinc-300 dark:border-zinc-600 text-zinc-700 dark:text-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-50"
+            >
+              Créer variante A/B
+            </button>
+          )}
           <button
             type="button"
             onClick={handleExportCsv}

@@ -20,6 +20,8 @@ export interface CampaignRow {
   org_id: string | null;
   name: string | null;
   template: string;
+  template_key?: string | null;
+  template_version?: number | null;
   question: string;
   options: string[];
   targeting: Record<string, unknown>;
@@ -43,6 +45,8 @@ function rowToCampaign(row: CampaignRow): Campaign {
     id: row.id,
     name: row.name ?? "Sans titre",
     template: row.template as CampaignTemplate,
+    templateKey: row.template_key ?? undefined,
+    templateVersion: row.template_version ?? undefined,
     question: row.question,
     options: Array.isArray(row.options) ? row.options : [],
     targeting,
@@ -64,7 +68,7 @@ export async function getCampaigns(): Promise<Campaign[]> {
   }
   const { data, error } = await supabase
     .from("campaigns")
-    .select("id, org_id, name, template, question, options, targeting, quota, reward_cents, price_cents, status, created_at, responses_count")
+    .select("id, org_id, name, template, template_key, template_version, question, options, targeting, quota, reward_cents, price_cents, status, created_at, responses_count")
     .eq("org_id", orgId)
     .order("created_at", { ascending: false });
   if (error) {
@@ -143,7 +147,7 @@ export async function getCampaignStats(campaignId: string): Promise<{
 } | null> {
   const { data: campaignRow, error: campError } = await supabase
     .from("campaigns")
-    .select("id, org_id, name, template, question, options, targeting, quota, reward_cents, price_cents, status, created_at, responses_count")
+    .select("id, org_id, name, template, template_key, template_version, question, options, targeting, quota, reward_cents, price_cents, status, created_at, responses_count")
     .eq("id", campaignId)
     .single();
   if (campError || !campaignRow) {
@@ -201,9 +205,11 @@ export async function createCampaign(params: {
   template: CampaignTemplate;
   question: string;
   options: string[];
-  targeting: CampaignTargeting;
+  targeting: CampaignTargeting & { responseType?: string };
   quota: number;
   rewardUser: number;
+  templateKey?: string | null;
+  templateVersion?: number;
 }): Promise<Campaign> {
   const orgId = await getCurrentOrgId();
   if (!orgId) {
@@ -221,21 +227,27 @@ export async function createCampaign(params: {
   const pricePerResponse = calcPricePerResponse(params.rewardUser);
   const reward_cents = Math.round(params.rewardUser * 100);
   const price_cents = Math.round(pricePerResponse * 100);
+  const targeting = { ...params.targeting };
+  if (params.targeting.responseType) {
+    (targeting as Record<string, unknown>).responseType = params.targeting.responseType;
+  }
   const { data, error } = await supabase
     .from("campaigns")
     .insert({
       org_id: orgId,
       name: params.name || null,
       template: params.template,
+      template_key: params.templateKey ?? null,
+      template_version: params.templateVersion ?? 1,
       question: params.question,
       options: params.options,
-      targeting: params.targeting,
+      targeting,
       quota: params.quota,
       reward_cents,
       price_cents,
       status: "active",
     })
-    .select("id, org_id, name, template, question, options, targeting, quota, reward_cents, price_cents, status, created_at")
+    .select("id, org_id, name, template, template_key, template_version, question, options, targeting, quota, reward_cents, price_cents, status, created_at")
     .single();
   if (error) {
     console.warn("[Supabase] createCampaign", error.message);
@@ -291,30 +303,37 @@ export async function validateCampaignPayouts(campaignId: string): Promise<{
 }
 
 /** Dupliquer une campagne (même org, status active, responses_count 0). */
-export async function duplicateCampaign(campaignId: string): Promise<Campaign | null> {
+export async function duplicateCampaign(
+  campaignId: string,
+  overrides?: { nameSuffix?: string; question?: string }
+): Promise<Campaign | null> {
   const orgId = await getCurrentOrgId();
   if (!orgId) return null;
   const { data: source, error: fetchErr } = await supabase
     .from("campaigns")
-    .select("name, template, question, options, targeting, quota, reward_cents, price_cents")
+    .select("name, template, template_key, template_version, question, options, targeting, quota, reward_cents, price_cents")
     .eq("id", campaignId)
     .single();
   if (fetchErr || !source) return null;
+  const name = (source.name ?? "Copie") + (overrides?.nameSuffix ?? " (copie)");
+  const question = overrides?.question ?? source.question;
   const { data: created, error: insertErr } = await supabase
     .from("campaigns")
     .insert({
       org_id: orgId,
-      name: (source.name ?? "Copie") + " (copie)",
+      name,
       template: source.template,
-      question: source.question,
-      options: source.options,
-      targeting: source.targeting,
+      template_key: source.template_key ?? null,
+      template_version: source.template_version ?? 1,
+      question,
+      options: source.options ?? [],
+      targeting: source.targeting ?? {},
       quota: source.quota,
       reward_cents: source.reward_cents,
       price_cents: source.price_cents,
       status: "active",
     })
-    .select("id, org_id, name, template, question, options, targeting, quota, reward_cents, price_cents, status, created_at, responses_count")
+    .select("id, org_id, name, template, template_key, template_version, question, options, targeting, quota, reward_cents, price_cents, status, created_at, responses_count")
     .single();
   if (insertErr || !created) return null;
   return rowToCampaign(created as CampaignRow);

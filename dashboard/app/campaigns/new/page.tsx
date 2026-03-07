@@ -1,20 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   calcPricePerResponse,
-  type CampaignTemplate,
   type CampaignTargeting,
 } from "@/src/lib/mockData";
 import { createCampaign } from "@/src/lib/supabaseCampaigns";
-
-const TEMPLATES: { value: CampaignTemplate; label: string }[] = [
-  { value: "A/B", label: "A/B" },
-  { value: "Price test", label: "Price test" },
-  { value: "Slogan", label: "Slogan" },
-];
+import {
+  CAMPAIGN_TEMPLATES,
+  templateKeyToLegacyTemplate,
+  type CampaignTemplatePreset,
+} from "@/src/lib/campaignTemplates";
 
 const REGIONS = [
   "Île-de-France",
@@ -25,10 +23,19 @@ const REGIONS = [
 ];
 const TAGS = ["Tech", "Mode", "Alimentation", "Sport", "Voyage", "Culture", "Santé", "Finance"];
 
+function applyPreset(preset: CampaignTemplatePreset) {
+  return {
+    question: preset.defaultQuestion,
+    optionsText: preset.defaultOptions.join("\n"),
+    quota: preset.defaultQuota,
+    rewardUser: preset.defaultRewardCents / 100,
+  };
+}
+
 export default function NewCampaignPage() {
   const router = useRouter();
   const [name, setName] = useState("");
-  const [template, setTemplate] = useState<CampaignTemplate>("A/B");
+  const [selectedPreset, setSelectedPreset] = useState<CampaignTemplatePreset | null>(null);
   const [question, setQuestion] = useState("");
   const [optionsText, setOptionsText] = useState("");
   const [ageMin, setAgeMin] = useState(18);
@@ -41,6 +48,25 @@ export default function NewCampaignPage() {
 
   const pricePerResponse = calcPricePerResponse(rewardUser);
   const total = Math.round(quota * pricePerResponse * 100) / 100;
+
+  const handleSelectTemplate = useCallback((preset: CampaignTemplatePreset) => {
+    setSelectedPreset(preset);
+    const { question: q, optionsText: opt, quota: qu, rewardUser: ru } = applyPreset(preset);
+    setQuestion(q);
+    setOptionsText(opt);
+    setQuota(qu);
+    setRewardUser(ru);
+  }, []);
+
+  const handleResetTemplate = useCallback(() => {
+    if (selectedPreset) {
+      const { question: q, optionsText: opt, quota: qu, rewardUser: ru } = applyPreset(selectedPreset);
+      setQuestion(q);
+      setOptionsText(opt);
+      setQuota(qu);
+      setRewardUser(ru);
+    }
+  }, [selectedPreset]);
 
   const toggleRegion = (r: string) => {
     if (r === "Toutes") {
@@ -69,20 +95,28 @@ export default function NewCampaignPage() {
       .split("\n")
       .map((s) => s.trim())
       .filter(Boolean);
-    const targeting: CampaignTargeting = {
+    const targeting: CampaignTargeting & { responseType?: string } = {
       ageMin,
       ageMax,
       regions: regions.length === 0 ? [] : regions.filter((r) => r !== "Toutes"),
       tags,
     };
+    if (selectedPreset?.responseType === "nps") {
+      targeting.responseType = "nps";
+    }
+    const legacyTemplate = selectedPreset
+      ? templateKeyToLegacyTemplate(selectedPreset.key)
+      : "A/B";
     const campaign = await createCampaign({
       name: name || "Sans titre",
-      template,
+      template: legacyTemplate as "A/B" | "Price test" | "Slogan" | "Concept" | "NPS",
       question: questionTrimmed,
-      options: options.length ? options : ["Oui", "Non"],
+      options: selectedPreset?.responseType === "nps" ? [] : options.length ? options : ["Oui", "Non"],
       targeting,
       quota,
       rewardUser,
+      templateKey: selectedPreset?.key ?? null,
+      templateVersion: 1,
     });
     router.push(`/campaigns/${campaign.id}`);
   };
@@ -98,13 +132,61 @@ export default function NewCampaignPage() {
             ← Retour
           </Link>
           <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">
-            Nouvelle campagne
+            Nouvelle campagne — Créer en 15 secondes
           </h1>
         </div>
       </header>
 
       <main className="mx-auto max-w-4xl px-6 py-8">
         <form onSubmit={handleSubmit} className="space-y-8">
+          <div>
+            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">
+              Choisir un template
+            </label>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+              {CAMPAIGN_TEMPLATES.map((preset) => (
+                <button
+                  key={preset.key}
+                  type="button"
+                  onClick={() => handleSelectTemplate(preset)}
+                  className={`rounded-xl border p-4 text-left transition ${
+                    selectedPreset?.key === preset.key
+                      ? "border-zinc-900 dark:border-zinc-100 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900"
+                      : "border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 hover:border-zinc-400 dark:hover:border-zinc-600"
+                  }`}
+                >
+                  <span className="font-medium block">{preset.name}</span>
+                  <span className={`text-xs mt-1 block ${selectedPreset?.key === preset.key ? "opacity-90" : "text-zinc-500 dark:text-zinc-400"}`}>
+                    {preset.description}
+                  </span>
+                </button>
+              ))}
+            </div>
+            {selectedPreset && (
+              <div className="mt-3 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleResetTemplate}
+                  className="text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 underline"
+                >
+                  Réinitialiser
+                </button>
+                <span className="text-zinc-400 dark:text-zinc-500">— valeurs du template {selectedPreset.name}</span>
+              </div>
+            )}
+          </div>
+
+          {selectedPreset && selectedPreset.tips.length > 0 && (
+            <div className="rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/30 p-4">
+              <h3 className="text-sm font-medium text-blue-900 dark:text-blue-200 mb-2">Conseils</h3>
+              <ul className="list-disc list-inside text-sm text-blue-800 dark:text-blue-300 space-y-1">
+                {selectedPreset.tips.map((tip, i) => (
+                  <li key={i}>{tip}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           <div>
             <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">
               Nom de la campagne
@@ -116,28 +198,6 @@ export default function NewCampaignPage() {
               className="w-full rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-4 py-2 text-zinc-900 dark:text-zinc-100"
               placeholder="Ex: Test prix produit X"
             />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">
-              Template
-            </label>
-            <div className="flex gap-2 flex-wrap">
-              {TEMPLATES.map((t) => (
-                <button
-                  key={t.value}
-                  type="button"
-                  onClick={() => setTemplate(t.value)}
-                  className={`rounded-lg border px-4 py-2 text-sm font-medium ${
-                    template === t.value
-                      ? "border-zinc-900 dark:border-zinc-100 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900"
-                      : "border-zinc-300 dark:border-zinc-600 text-zinc-700 dark:text-zinc-300"
-                  }`}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
           </div>
 
           <div>
@@ -158,18 +218,20 @@ export default function NewCampaignPage() {
             )}
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">
-              Options (une par ligne)
-            </label>
-            <textarea
-              value={optionsText}
-              onChange={(e) => setOptionsText(e.target.value)}
-              rows={4}
-              className="w-full rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-4 py-2 text-zinc-900 dark:text-zinc-100"
-              placeholder="Option 1&#10;Option 2&#10;Option 3"
-            />
-          </div>
+          {selectedPreset?.responseType !== "nps" && (
+            <div>
+              <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">
+                Options (une par ligne)
+              </label>
+              <textarea
+                value={optionsText}
+                onChange={(e) => setOptionsText(e.target.value)}
+                rows={4}
+                className="w-full rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-4 py-2 text-zinc-900 dark:text-zinc-100"
+                placeholder="Option 1&#10;Option 2&#10;Option 3"
+              />
+            </div>
+          )}
 
           <div>
             <h3 className="text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-3">

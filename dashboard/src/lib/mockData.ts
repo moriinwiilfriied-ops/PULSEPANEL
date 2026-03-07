@@ -3,7 +3,7 @@
  * Aucun appel réseau. Campagnes et réponses en mémoire.
  */
 
-export type CampaignTemplate = 'A/B' | 'Price test' | 'Slogan';
+export type CampaignTemplate = 'A/B' | 'Price test' | 'Slogan' | 'Concept' | 'NPS';
 
 export interface CampaignTargeting {
   ageMin: number;
@@ -16,6 +16,8 @@ export interface Campaign {
   id: string;
   name: string;
   template: CampaignTemplate;
+  templateKey?: string;
+  templateVersion?: number;
   question: string;
   options: string[];
   targeting: CampaignTargeting;
