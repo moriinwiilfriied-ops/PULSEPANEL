@@ -2,21 +2,23 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { getCurrentOrgId, getOrgBalance, orgTopupDev } from "@/src/lib/supabase";
+import { getOrgMembership, getOrgBalance, orgTopupDev } from "@/src/lib/supabase";
 
 export function OrgCreditHeader() {
-  const [orgId, setOrgId] = useState<string | null>(null);
+  const [membership, setMembership] = useState<{ orgId: string; role: string } | null>(null);
   const [availableCents, setAvailableCents] = useState<number | null>(null);
   const [topupOpen, setTopupOpen] = useState(false);
   const [topupAmount, setTopupAmount] = useState("10");
   const [topupLoading, setTopupLoading] = useState(false);
   const [topupError, setTopupError] = useState<string | null>(null);
 
+  const orgId = membership?.orgId ?? null;
+
   const loadBalance = async () => {
-    const id = await getCurrentOrgId();
-    setOrgId(id ?? null);
-    if (id) {
-      const balance = await getOrgBalance(id);
+    const m = await getOrgMembership();
+    setMembership(m ?? null);
+    if (m?.orgId) {
+      const balance = await getOrgBalance(m.orgId);
       setAvailableCents(balance ? balance.available_cents : null);
     } else {
       setAvailableCents(null);
@@ -68,6 +70,11 @@ export function OrgCreditHeader() {
               <span className="text-sm text-zinc-600 dark:text-zinc-400">
                 {creditLabel}
               </span>
+              {process.env.NODE_ENV === "development" && membership && (
+                <span className="text-xs text-zinc-400 dark:text-zinc-500 truncate max-w-[120px]" title={`${orgId} (${membership.role})`}>
+                  {orgId.slice(0, 8)}… {membership.role}
+                </span>
+              )}
               <button
                 type="button"
                 onClick={() => {

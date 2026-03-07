@@ -47,7 +47,9 @@ export default function NewCampaignPage() {
   const [rewardUser, setRewardUser] = useState(0.2);
   const [questionError, setQuestionError] = useState("");
   const [submitError, setSubmitError] = useState<"insufficient_org_credit" | "creation_failed" | null>(null);
+  const [submitErrorMessage, setSubmitErrorMessage] = useState<string | null>(null);
   const [orgCreditCents, setOrgCreditCents] = useState<number | null>(null);
+  const [publishNow, setPublishNow] = useState(true);
 
   const rewardCents = Math.round(rewardUser * 100);
   const costPerResponseCents = computeCostPerResponseCents(rewardCents);
@@ -101,6 +103,7 @@ export default function NewCampaignPage() {
     e.preventDefault();
     setQuestionError("");
     setSubmitError(null);
+    setSubmitErrorMessage(null);
     const questionTrimmed = question.trim();
     if (!questionTrimmed) {
       setQuestionError("La question est obligatoire.");
@@ -132,12 +135,14 @@ export default function NewCampaignPage() {
       rewardUser,
       templateKey: selectedPreset?.key ?? null,
       templateVersion: 1,
+      publishNow,
     });
     if ("error" in result) {
       if (result.error === "insufficient_org_credit") {
         setSubmitError("insufficient_org_credit");
       } else {
         setSubmitError("creation_failed");
+        setSubmitErrorMessage(result.message ?? null);
       }
       return;
     }
@@ -352,19 +357,41 @@ export default function NewCampaignPage() {
             </div>
           </div>
 
+          <div className="flex items-center gap-3">
+            <label className="inline-flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={publishNow}
+                onChange={(e) => setPublishNow(e.target.checked)}
+                className="rounded border-zinc-300 dark:border-zinc-600"
+              />
+              <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                Publier maintenant
+              </span>
+            </label>
+          </div>
+
           <div className="rounded-xl bg-zinc-100 dark:bg-zinc-800/50 p-4 space-y-1">
             <p className="text-sm text-zinc-600 dark:text-zinc-400">
               Récompense user : <strong>{rewardUser.toFixed(2)} €</strong>
             </p>
-            <p className="text-sm text-zinc-600 dark:text-zinc-400">
-              Coût facturé : <strong>{costPerResponseEur.toFixed(2)} €</strong> / réponse
-            </p>
-            <p className="text-sm text-zinc-600 dark:text-zinc-400">
-              Total estimé : <strong>{totalCostEur.toFixed(2)} €</strong>
-            </p>
-            {creditInsufficient && (
-              <p className="text-sm text-amber-700 dark:text-amber-400 mt-2">
-                Votre crédit est insuffisant pour cette campagne. Rechargez votre compte (bouton « Recharger (DEV) » en haut).
+            {publishNow ? (
+              <>
+                <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                  Coût facturé : <strong>{costPerResponseEur.toFixed(2)} €</strong> / réponse
+                </p>
+                <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                  Total estimé : <strong>{totalCostEur.toFixed(2)} €</strong>
+                </p>
+                {creditInsufficient && (
+                  <p className="text-sm text-amber-700 dark:text-amber-400 mt-2">
+                    Votre crédit est insuffisant pour cette campagne. Rechargez votre compte (bouton « Recharger (DEV) » en haut).
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                Coût appliqué à la publication.
               </p>
             )}
           </div>
@@ -383,9 +410,16 @@ export default function NewCampaignPage() {
             </div>
           )}
           {submitError === "creation_failed" && (
-            <p className="text-sm text-red-600 dark:text-red-400">
-              Création impossible.
-            </p>
+            <div>
+              <p className="text-sm text-red-600 dark:text-red-400">
+                Création impossible.
+              </p>
+              {process.env.NODE_ENV === "development" && submitErrorMessage && (
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 font-mono">
+                  {submitErrorMessage}
+                </p>
+              )}
+            </div>
           )}
 
           <div className="flex gap-3">

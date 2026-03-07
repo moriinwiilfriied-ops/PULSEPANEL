@@ -23,8 +23,10 @@ export async function ensureAnonSession(): Promise<void> {
   }
 }
 
+const ROLE_ORDER: Record<string, number> = { owner: 0, editor: 1 };
+
 /**
- * Retourne l'org du user courant (première org dont il est membre). null si aucune.
+ * Retourne l'org du user courant (déterministe: owner puis editor, puis org la plus récente). null si aucune.
  */
 export async function getCurrentOrgId(): Promise<string | null> {
   const m = await getOrgMembership();
@@ -32,7 +34,7 @@ export async function getCurrentOrgId(): Promise<string | null> {
 }
 
 /**
- * Retourne l'org + rôle du user courant (première ligne org_members). Pour DEV / debug RPC.
+ * Org + rôle déterministe: owner avant editor, puis orgs.created_at desc. Même org partout (header, campaigns/new).
  */
 export async function getOrgMembership(): Promise<{
   orgId: string;
@@ -40,15 +42,27 @@ export async function getOrgMembership(): Promise<{
 } | null> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
-  const { data } = await supabase
+  const { data: rows } = await supabase
     .from('org_members')
-    .select('org_id, role')
-    .eq('user_id', user.id)
-    .limit(1)
-    .maybeSingle();
-  if (!data) return null;
-  const orgId = (data as { org_id?: string }).org_id;
-  const role = (data as { role?: string }).role ?? '';
+    .select('org_id, role, orgs(created_at)')
+    .eq('user_id', user.id);
+  if (!rows?.length) return null;
+  const withCreated = rows as Array<{
+    org_id?: string;
+    role?: string;
+    orgs?: { created_at?: string } | null;
+  }>;
+  const sorted = [...withCreated].sort((a, b) => {
+    const orderA = ROLE_ORDER[a.role ?? ''] ?? 2;
+    const orderB = ROLE_ORDER[b.role ?? ''] ?? 2;
+    if (orderA !== orderB) return orderA - orderB;
+    const atA = a.orgs?.created_at ?? '';
+    const atB = b.orgs?.created_at ?? '';
+    return atB.localeCompare(atA);
+  });
+  const first = sorted[0];
+  const orgId = first?.org_id ?? null;
+  const role = first?.role ?? '';
   return orgId ? { orgId, role } : null;
 }
 

@@ -7,7 +7,7 @@ import { supabase, getCurrentOrgId } from "@/src/lib/supabase";
 
 /** Coût facturé par réponse (centimes), formule alignée avec la DB. */
 export function computeCostPerResponseCents(rewardCents: number): number {
-  return Math.ceil(rewardCents * 1.7 + 35);
+  return Math.ceil(rewardCents * 1.35 + 10);
 }
 import {
   getCampaigns as getMockCampaigns,
@@ -209,7 +209,14 @@ export type CreateCampaignResult =
   | { error: "insufficient_org_credit" }
   | { error: "creation_failed"; message?: string };
 
-/** Créer une campagne pour l'org courant (org_id requis). Le trigger DB facture si status=active. */
+function isInsufficientOrgCreditError(error: { message?: string; details?: string; hint?: string }): boolean {
+  const msg = (error.message ?? "").toLowerCase();
+  const details = (error.details ?? "").toLowerCase();
+  const hint = (error.hint ?? "").toLowerCase();
+  return msg.includes("insufficient_org_credit") || details.includes("insufficient_org_credit") || hint.includes("insufficient_org_credit");
+}
+
+/** Créer une campagne pour l'org courant (org_id requis). Si publishNow=true le trigger DB facture au passage en active. */
 export async function createCampaign(params: {
   name: string;
   template: CampaignTemplate;
@@ -220,6 +227,8 @@ export async function createCampaign(params: {
   rewardUser: number;
   templateKey?: string | null;
   templateVersion?: number;
+  /** Si true (défaut), status=active et billing au insert. Si false, status=paused (pas de billing). */
+  publishNow?: boolean;
 }): Promise<CreateCampaignResult> {
   const orgId = await getCurrentOrgId();
   if (!orgId) {
@@ -241,6 +250,7 @@ export async function createCampaign(params: {
   if (params.targeting.responseType) {
     (targeting as Record<string, unknown>).responseType = params.targeting.responseType;
   }
+  const status = params.publishNow !== false ? "active" : "paused";
   const { data, error } = await supabase
     .from("campaigns")
     .insert({
@@ -255,15 +265,15 @@ export async function createCampaign(params: {
       quota: params.quota,
       reward_cents,
       price_cents,
-      status: "active",
+      status,
     })
     .select("id, org_id, name, template, template_key, template_version, question, options, targeting, quota, reward_cents, price_cents, status, created_at, responses_count")
     .single();
   if (error) {
-    const msg = (error as { message?: string }).message ?? "";
-    if (msg.includes("insufficient_org_credit")) {
+    if (isInsufficientOrgCreditError(error)) {
       return { error: "insufficient_org_credit" };
     }
+    const msg = (error as { message?: string }).message ?? "";
     console.warn("[Supabase] createCampaign", error.message);
     return { error: "creation_failed", message: msg };
   }

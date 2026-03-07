@@ -31,6 +31,7 @@ export default function CampaignDetailPage() {
   const [exportError, setExportError] = useState<string | null>(null);
   const [exportLoading, setExportLoading] = useState(false);
   const [duplicateError, setDuplicateError] = useState<"insufficient_org_credit" | "failed" | null>(null);
+  const [publishError, setPublishError] = useState(false);
 
   const loadStats = () => {
     setLoading(true);
@@ -57,8 +58,13 @@ export default function CampaignDetailPage() {
 
   const handleStatus = async (status: "active" | "paused" | "completed") => {
     setActionLoading(true);
+    setPublishError(false);
     const { error } = await updateCampaignStatus(id, status);
     setActionLoading(false);
+    if (error && status === "active") {
+      const msg = (error as { message?: string }).message ?? "";
+      if (msg.includes("insufficient_org_credit")) setPublishError(true);
+    }
     if (!error) loadStats();
   };
 
@@ -298,8 +304,16 @@ export default function CampaignDetailPage() {
                 disabled={actionLoading}
                 className="rounded-lg bg-emerald-600 text-white px-4 py-2 text-sm font-medium hover:bg-emerald-700 disabled:opacity-50"
               >
-                Reprendre
+                Publier
               </button>
+              {publishError && (
+                <p className="text-sm text-red-600 dark:text-red-400">
+                  Crédit insuffisant.{" "}
+                  <Link href="/" className="underline hover:no-underline">
+                    Recharger (DEV)
+                  </Link>
+                </p>
+              )}
               <button
                 type="button"
                 onClick={() => handleStatus("completed")}
