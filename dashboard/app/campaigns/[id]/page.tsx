@@ -4,6 +4,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { getCampaignStats, updateCampaignStatus, duplicateCampaign, validateCampaignPayouts } from "@/src/lib/supabaseCampaigns";
+import { supabase, getOrgMembership } from "@/src/lib/supabase";
 
 type Stats = Awaited<ReturnType<typeof getCampaignStats>>;
 
@@ -19,6 +20,12 @@ export default function CampaignDetailPage() {
     users: number;
     total_cents: number;
   } | null>(null);
+  const [validateError, setValidateError] = useState<string | null>(null);
+  const [devAuth, setDevAuth] = useState<{ userId: string | null; orgId: string | null; role: string | null }>({
+    userId: null,
+    orgId: null,
+    role: null,
+  });
 
   const loadStats = () => {
     setLoading(true);
@@ -28,6 +35,19 @@ export default function CampaignDetailPage() {
   useEffect(() => {
     loadStats();
   }, [id]);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development") return;
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      const membership = await getOrgMembership();
+      setDevAuth({
+        userId: user?.id ?? null,
+        orgId: membership?.orgId ?? null,
+        role: membership?.role ?? null,
+      });
+    })();
+  }, []);
 
   const handleStatus = async (status: "active" | "paused" | "completed") => {
     setActionLoading(true);
@@ -46,10 +66,16 @@ export default function CampaignDetailPage() {
   const handleValidatePayouts = async () => {
     setActionLoading(true);
     setValidateResult(null);
+    setValidateError(null);
     const result = await validateCampaignPayouts(id);
     setActionLoading(false);
     if (result.error) {
-      console.warn("[validateCampaignPayouts]", result.error.message);
+      const msg = result.error.message?.toLowerCase() ?? "";
+      setValidateError(
+        msg.includes("not_authenticated") || msg.includes("jwt")
+          ? "Connectez-vous."
+          : "Validation impossible: vous n'êtes pas autorisé."
+      );
       return;
     }
     if (
@@ -116,6 +142,18 @@ export default function CampaignDetailPage() {
       </header>
 
       <main className="mx-auto max-w-4xl px-6 py-8 space-y-8">
+        {process.env.NODE_ENV === "development" && (
+          <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-xs text-amber-900 dark:text-amber-200 font-mono">
+            <span className="font-semibold">DEV</span> user_id: {devAuth.userId ?? "—"} | org_id: {devAuth.orgId ?? "—"} | role: {devAuth.role ?? "—"}
+          </div>
+        )}
+
+        {validateError && (
+          <div className="rounded-xl border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/30 p-4">
+            <p className="text-sm font-medium text-red-800 dark:text-red-200">{validateError}</p>
+          </div>
+        )}
+
         <div className="flex flex-wrap items-center gap-3">
           <span
             className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
@@ -190,11 +228,7 @@ export default function CampaignDetailPage() {
         {validateResult && (
           <div className="rounded-xl border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-950/30 p-4">
             <p className="text-sm font-medium text-violet-800 dark:text-violet-200">
-              Paiements validés
-            </p>
-            <p className="text-zinc-600 dark:text-zinc-400 text-sm mt-1">
-              {validateResult.validated_responses} réponses, {validateResult.users} utilisateur(s),{" "}
-              {(validateResult.total_cents / 100).toFixed(2)} €
+              Paiements validés: {validateResult.validated_responses} réponse(s), {validateResult.users} utilisateur(s), {(validateResult.total_cents / 100).toFixed(2)} €
             </p>
           </div>
         )}

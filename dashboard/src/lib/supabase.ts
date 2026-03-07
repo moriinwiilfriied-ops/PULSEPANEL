@@ -27,15 +27,29 @@ export async function ensureAnonSession(): Promise<void> {
  * Retourne l'org du user courant (première org dont il est membre). null si aucune.
  */
 export async function getCurrentOrgId(): Promise<string | null> {
+  const m = await getOrgMembership();
+  return m?.orgId ?? null;
+}
+
+/**
+ * Retourne l'org + rôle du user courant (première ligne org_members). Pour DEV / debug RPC.
+ */
+export async function getOrgMembership(): Promise<{
+  orgId: string;
+  role: string;
+} | null> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
   const { data } = await supabase
     .from('org_members')
-    .select('org_id')
+    .select('org_id, role')
     .eq('user_id', user.id)
     .limit(1)
-    .single();
-  return data?.org_id ?? null;
+    .maybeSingle();
+  if (!data) return null;
+  const orgId = (data as { org_id?: string }).org_id;
+  const role = (data as { role?: string }).role ?? '';
+  return orgId ? { orgId, role } : null;
 }
 
 /**
