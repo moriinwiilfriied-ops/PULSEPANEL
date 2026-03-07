@@ -6,6 +6,23 @@ import { supabase } from '@/lib/supabase';
 import type { FeedQuestion, MockQuestion } from '@/lib/mockData';
 import { getAppStore } from '@/store/useAppStore';
 
+/** Entrée d’historique wallet serveur (responses + question lisible via join campaigns). */
+export interface ServerWalletHistoryEntry {
+  id: string;
+  campaignId: string;
+  questionText: string;
+  answer: string | null;
+  rewardCents: number;
+  payoutStatus: 'pending' | 'available';
+  createdAt: string;
+}
+
+/** Supabase est configuré si l’URL est définie. */
+export function isSupabaseConfigured(): boolean {
+  const url = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
+  return url.length > 0;
+}
+
 export interface UserOnboardingRow {
   id: string;
   age_bucket: string | null;
@@ -158,14 +175,100 @@ export async function getFeedQuestions(): Promise<FeedQuestion[]> {
   return [];
 }
 
-/** Insert response + met à jour le wallet local (mock). */
+export interface WalletFromSupabase {
+  pendingCents: number;
+  availableCents: number;
+  history: ServerWalletHistoryEntry[];
+  /** false si aucune ligne user_balances pour cet utilisateur (répondez à une question SB). */
+  hasBalanceRow: boolean;
+}
+
+type ResponseRowWithCampaign = {
+  id: string;
+  campaign_id: string;
+  reward_cents: number;
+  payout_status: string;
+  created_at: string;
+  answer: { value?: string } | null;
+  campaigns: { question?: string; name?: string; template?: string } | null;
+};
+
+/** Récupère balances + 20 dernières réponses depuis la DB (source de vérité). Robuste : logs en cas d’erreur, ne crash pas. */
+export async function fetchWalletFromSupabase(): Promise<WalletFromSupabase | null> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
+    if (__DEV__) console.warn('[Supabase] fetchWalletFromSupabase: no user (auth.uid())');
+    return null;
+  }
+
+  let pendingCents = 0;
+  let availableCents = 0;
+  let hasBalanceRow = false;
+
+  const balanceRes = await supabase
+    .from('user_balances')
+    .select('pending_cents, available_cents')
+    .eq('user_id', user.id)
+    .maybeSingle();
+
+  if (balanceRes.error) {
+    const err = balanceRes.error as { status?: number; message?: string };
+    console.warn('[Supabase] wallet user_balances', err.status, err.message);
+  } else if (balanceRes.data) {
+    pendingCents = Number((balanceRes.data as { pending_cents?: number }).pending_cents) || 0;
+    availableCents = Number((balanceRes.data as { available_cents?: number }).available_cents) || 0;
+    hasBalanceRow = true;
+  }
+
+  const responsesRes = await supabase
+    .from('responses')
+    .select('id, campaign_id, reward_cents, payout_status, created_at, answer, campaigns(question, name, template)')
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: false })
+    .limit(20);
+
+  if (responsesRes.error) {
+    const err = responsesRes.error as { status?: number; message?: string };
+    console.warn('[Supabase] wallet responses', err.status, err.message);
+  }
+
+  const rows = (responsesRes.data ?? []) as ResponseRowWithCampaign[];
+  const history: ServerWalletHistoryEntry[] = rows.map((r) => {
+    const c = r.campaigns;
+    const questionText = (c?.question ?? c?.name ?? '').trim() || 'Question';
+    const answerVal =
+      r.answer && typeof r.answer === 'object' && 'value' in r.answer
+        ? String(r.answer.value)
+        : r.answer != null
+          ? JSON.stringify(r.answer)
+          : null;
+    return {
+      id: r.id,
+      campaignId: r.campaign_id,
+      questionText,
+      answer: answerVal,
+      rewardCents: r.reward_cents ?? 0,
+      payoutStatus: r.payout_status === 'available' ? 'available' : 'pending',
+      createdAt: r.created_at,
+    };
+  });
+
+  return {
+    pendingCents,
+    availableCents,
+    history,
+    hasBalanceRow,
+  };
+}
+
+/** Insert response ; le crédit pending est fait par le trigger DB. Puis refetch wallet. */
 export async function submitResponseToSupabase(params: {
   campaignId: string;
   question: string;
   answer: string;
   durationMs?: number;
   rewardCents: number;
-}): Promise<{ error: Error | null }> {
+}): Promise<{ error: Error | null; reward?: number }> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: new Error('Not authenticated') };
   const { error } = await supabase.from('responses').insert({
@@ -176,16 +279,26 @@ export async function submitResponseToSupabase(params: {
   });
   if (error) return { error };
   const reward = params.rewardCents / 100;
-  const entry = {
-    id: `h-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-    questionId: params.campaignId,
-    questionTitle: params.question,
-    answer: params.answer,
-    reward,
-    status: 'pending' as const,
-    at: new Date().toISOString(),
+  const wallet = await fetchWalletFromSupabase();
+  if (wallet) getAppStore().setServerWallet(wallet);
+  return { error: null, reward };
+}
+
+/** DEV : valider les paiements d’une campagne (RPC). Nécessite d’être membre org owner/editor. */
+export async function validateCampaignPayouts(campaignId: string): Promise<{
+  error: Error | null;
+  validated_responses?: number;
+  users?: number;
+  total_cents?: number;
+}> {
+  const { data, error } = await supabase.rpc('validate_campaign_payouts', { _campaign_id: campaignId });
+  if (error) return { error };
+  const obj = data as { error?: string; validated_responses?: number; users?: number; total_cents?: number } | null;
+  if (obj?.error) return { error: new Error(obj.error) };
+  return {
+    error: null,
+    validated_responses: obj?.validated_responses,
+    users: obj?.users,
+    total_cents: obj?.total_cents,
   };
-  getAppStore().addHistoryEntry(entry);
-  getAppStore().addPendingReward(reward);
-  return { error: null };
 }

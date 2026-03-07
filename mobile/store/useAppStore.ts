@@ -1,10 +1,20 @@
 /**
  * Store global (Zustand) — onboarding + wallet + history
  * Compatible Expo Go, pas de dépendances natives.
+ * Si Supabase configuré, serverWallet est la source de vérité (balances + historique).
  */
 
 import { create } from 'zustand';
 import type { HistoryEntry } from '@/lib/mockData';
+import type { ServerWalletHistoryEntry } from '@/lib/supabaseApi';
+
+export interface ServerWalletData {
+  pendingCents: number;
+  availableCents: number;
+  history: ServerWalletHistoryEntry[];
+  /** false si aucune ligne user_balances (afficher message "répondez à une question SB"). */
+  hasBalanceRow?: boolean;
+}
 
 interface OnboardingState {
   age: number | null;
@@ -17,6 +27,8 @@ interface WalletState {
   pending: number;
   available: number;
   history: HistoryEntry[];
+  /** Quand non null, wallet affiche ces données (Supabase) au lieu de pending/available/history */
+  serverWallet: ServerWalletData | null;
 }
 
 interface AppState extends OnboardingState, WalletState {
@@ -24,6 +36,7 @@ interface AppState extends OnboardingState, WalletState {
   completeOnboarding: () => void;
   addHistoryEntry: (entry: HistoryEntry) => void;
   addPendingReward: (amount: number) => void;
+  setServerWallet: (data: ServerWalletData | null) => void;
   /** Simuler validation : transfère `amount` de pending vers available */
   simulateValidation: (amount: number) => void;
   /** DEV: transfère tout le pending vers available */
@@ -39,6 +52,9 @@ export const useAppStore = create<AppState>((set) => ({
   pending: 0,
   available: 0,
   history: [],
+  serverWallet: null,
+
+  setServerWallet: (data) => set({ serverWallet: data }),
 
   setOnboarding: (age, region, tags) =>
     set({ age, region, tags }),

@@ -84,6 +84,9 @@ export async function getCampaignStats(campaignId: string): Promise<{
   trustAvg: number;
   qualityBadge: string;
   verbatims: CampaignResponse[];
+  pendingCount?: number;
+  availableCount?: number;
+  source: "supabase" | "mock";
 } | null> {
   const { data: campaignRow, error: campError } = await supabase
     .from("campaigns")
@@ -91,18 +94,24 @@ export async function getCampaignStats(campaignId: string): Promise<{
     .eq("id", campaignId)
     .single();
   if (campError || !campaignRow) {
-    return getMockCampaignStats(campaignId) ?? null;
+    const mock = getMockCampaignStats(campaignId);
+    return mock ? { ...mock, source: "mock" as const } : null;
   }
   const campaign = rowToCampaign(campaignRow as CampaignRow);
 
   const { data: responsesRows, error: respError } = await supabase
     .from("responses")
-    .select("id, campaign_id, user_id, answer, created_at")
+    .select("id, campaign_id, user_id, answer, created_at, payout_status")
     .eq("campaign_id", campaignId)
     .order("created_at", { ascending: false });
   if (respError) {
-    return getMockCampaignStats(campaignId) ?? null;
+    const mock = getMockCampaignStats(campaignId);
+    return mock ? { ...mock, source: "mock" as const } : null;
   }
+  const rows = (responsesRows ?? []) as Array<{ payout_status?: string }>;
+  const pendingCount = rows.filter((r) => r.payout_status === "pending").length;
+  const availableCount = rows.filter((r) => r.payout_status === "available").length;
+
   const verbatims: CampaignResponse[] = (responsesRows ?? []).map((r: { id: string; campaign_id: string; answer: { value?: string }; created_at: string }) => ({
     id: r.id,
     campaignId: r.campaign_id,
@@ -127,6 +136,9 @@ export async function getCampaignStats(campaignId: string): Promise<{
     trustAvg: Math.round(trustAvg * 10) / 10,
     qualityBadge,
     verbatims,
+    pendingCount,
+    availableCount,
+    source: "supabase",
   };
 }
 
@@ -197,6 +209,32 @@ export async function updateCampaignStatus(
     .update({ status })
     .eq("id", campaignId);
   return { error: error ?? null };
+}
+
+/** Valider les paiements d’une campagne (pending → available). RPC sécurisée via org membership. */
+export async function validateCampaignPayouts(campaignId: string): Promise<{
+  error: Error | null;
+  validated_responses?: number;
+  users?: number;
+  total_cents?: number;
+}> {
+  const { data, error } = await supabase.rpc("validate_campaign_payouts", {
+    _campaign_id: campaignId,
+  });
+  if (error) return { error };
+  const obj = data as {
+    error?: string;
+    validated_responses?: number;
+    users?: number;
+    total_cents?: number;
+  } | null;
+  if (obj?.error) return { error: new Error(obj.error) };
+  return {
+    error: null,
+    validated_responses: obj?.validated_responses,
+    users: obj?.users,
+    total_cents: obj?.total_cents,
+  };
 }
 
 /** Dupliquer une campagne (même org, status active, responses_count 0). */

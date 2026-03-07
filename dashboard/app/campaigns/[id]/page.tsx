@@ -3,7 +3,7 @@
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { getCampaignStats, updateCampaignStatus, duplicateCampaign } from "@/src/lib/supabaseCampaigns";
+import { getCampaignStats, updateCampaignStatus, duplicateCampaign, validateCampaignPayouts } from "@/src/lib/supabaseCampaigns";
 
 type Stats = Awaited<ReturnType<typeof getCampaignStats>>;
 
@@ -14,6 +14,11 @@ export default function CampaignDetailPage() {
   const [stats, setStats] = useState<Stats>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
+  const [validateResult, setValidateResult] = useState<{
+    validated_responses: number;
+    users: number;
+    total_cents: number;
+  } | null>(null);
 
   const loadStats = () => {
     setLoading(true);
@@ -38,6 +43,29 @@ export default function CampaignDetailPage() {
     if (created) router.push(`/campaigns/${created.id}`);
   };
 
+  const handleValidatePayouts = async () => {
+    setActionLoading(true);
+    setValidateResult(null);
+    const result = await validateCampaignPayouts(id);
+    setActionLoading(false);
+    if (result.error) {
+      console.warn("[validateCampaignPayouts]", result.error.message);
+      return;
+    }
+    if (
+      result.validated_responses != null &&
+      result.users != null &&
+      result.total_cents != null
+    ) {
+      setValidateResult({
+        validated_responses: result.validated_responses,
+        users: result.users,
+        total_cents: result.total_cents,
+      });
+    }
+    loadStats();
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 flex items-center justify-center">
@@ -58,7 +86,18 @@ export default function CampaignDetailPage() {
     );
   }
 
-  const { campaign, responsesCount, quota, distribution, trustAvg, qualityBadge, verbatims } = stats;
+  const {
+    campaign,
+    responsesCount,
+    quota,
+    distribution,
+    trustAvg,
+    qualityBadge,
+    verbatims,
+    pendingCount = 0,
+    availableCount = 0,
+    source = "mock",
+  } = stats;
 
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
@@ -128,6 +167,16 @@ export default function CampaignDetailPage() {
               </button>
             </>
           )}
+          {campaign.status !== "completed" && (
+            <button
+              type="button"
+              onClick={handleValidatePayouts}
+              disabled={actionLoading}
+              className="rounded-lg bg-violet-600 text-white px-4 py-2 text-sm font-medium hover:bg-violet-700 disabled:opacity-50"
+            >
+              Valider paiements
+            </button>
+          )}
           <button
             type="button"
             onClick={handleDuplicate}
@@ -138,11 +187,31 @@ export default function CampaignDetailPage() {
           </button>
         </div>
 
+        {validateResult && (
+          <div className="rounded-xl border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-950/30 p-4">
+            <p className="text-sm font-medium text-violet-800 dark:text-violet-200">
+              Paiements validés
+            </p>
+            <p className="text-zinc-600 dark:text-zinc-400 text-sm mt-1">
+              {validateResult.validated_responses} réponses, {validateResult.users} utilisateur(s),{" "}
+              {(validateResult.total_cents / 100).toFixed(2)} €
+            </p>
+          </div>
+        )}
+
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
             <p className="text-sm text-zinc-500 dark:text-zinc-400">Réponses</p>
             <p className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
               {responsesCount} / {quota}
+            </p>
+          </div>
+          <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
+            <p className="text-sm text-zinc-500 dark:text-zinc-400">Paiements</p>
+            <p className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
+              <span className="text-amber-600 dark:text-amber-400">{pendingCount} pending</span>
+              {" · "}
+              <span className="text-emerald-600 dark:text-emerald-400">{availableCount} dispo.</span>
             </p>
           </div>
           <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
@@ -158,7 +227,9 @@ export default function CampaignDetailPage() {
             </p>
           </div>
           <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
-            <p className="text-sm text-zinc-500 dark:text-zinc-400">Total (mock)</p>
+            <p className="text-sm text-zinc-500 dark:text-zinc-400">
+              Total{source === "mock" ? " (mock)" : ""}
+            </p>
             <p className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
               {campaign.total} €
             </p>
@@ -187,7 +258,7 @@ export default function CampaignDetailPage() {
 
         <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
           <h3 className="text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-3">
-            Verbatims (mock)
+            Verbatims{source === "mock" ? " (mock)" : ""}
           </h3>
           {verbatims.length === 0 ? (
             <p className="text-zinc-500 dark:text-zinc-400 text-sm">Aucune réponse pour l’instant.</p>
