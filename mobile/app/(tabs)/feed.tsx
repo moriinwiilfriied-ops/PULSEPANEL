@@ -17,7 +17,7 @@ import { Text } from '@/components/Themed';
 import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
 import { getAvailableQuestions, type FeedQuestion } from '@/lib/mockData';
-import { getFeedQuestions } from '@/lib/supabaseApi';
+import { getFeedQuestionsWithSource, type FeedSource } from '@/lib/supabaseApi';
 import { useAppStore } from '@/store/useAppStore';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -29,6 +29,8 @@ export default function FeedScreen() {
   const colors = Colors[colorScheme];
   const completed = useAppStore((s) => s.completed);
   const [questions, setQuestions] = useState<FeedQuestion[]>([]);
+  const [feedSource, setFeedSource] = useState<FeedSource>('mock');
+  const [feedError, setFeedError] = useState<string | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedQuestion, setSelectedQuestion] = useState<FeedQuestion | null>(null);
 
@@ -42,12 +44,10 @@ export default function FeedScreen() {
   const loadQuestions = useCallback(() => {
     if (!completed) return;
     (async () => {
-      const fromSupabase = await getFeedQuestions();
-      if (fromSupabase.length > 0) {
-        setQuestions(fromSupabase);
-        return;
-      }
-      setQuestions(getAvailableQuestions());
+      const res = await getFeedQuestionsWithSource();
+      setFeedSource(res.source);
+      setFeedError(res.error ?? null);
+      setQuestions(res.items);
     })();
   }, [completed]);
 
@@ -80,19 +80,40 @@ export default function FeedScreen() {
     }
   };
 
-  const onAnswerClosed = () => {
+  const   onAnswerClosed = () => {
     setSelectedQuestion(null);
-    setQuestions(getAvailableQuestions());
+    loadQuestions();
     if (currentIndex >= questions.length - 1) setCurrentIndex(0);
     else setCurrentIndex((i) => i + 1);
   };
 
   if (!completed) return null;
+
+  const emptyMessage =
+    feedSource === 'supabase_error'
+      ? 'Impossible de charger les campagnes.'
+      : feedSource === 'supabase'
+        ? 'Aucune campagne disponible pour le moment.'
+        : 'Plus de questions pour l\'instant.';
+  const emptySub =
+    feedSource === 'supabase_error'
+      ? (__DEV__ && feedError ? feedError : 'Vérifiez votre connexion ou réessayez.')
+      : 'Revenez plus tard pour gagner des récompenses.';
+
   if (questions.length === 0) {
     return (
       <View style={[styles.container, { paddingTop: insets.top + 24 }]}>
-        <Text style={[styles.title, { color: colors.text }]}>Plus de questions pour l'instant</Text>
-        <Text style={[styles.subtitle, { color: colors.tabIconDefault }]}>Revenez plus tard pour gagner des récompenses.</Text>
+        {__DEV__ && (
+          <View style={styles.devPanel}>
+            <Text style={styles.devLine}>
+              SOURCE: {feedSource === 'supabase' ? 'SB' : feedSource === 'supabase_error' ? 'SB_ERR' : 'MOCK'}
+            </Text>
+            <Text style={styles.devLine}>campaigns loaded: 0</Text>
+            {feedError ? <Text style={[styles.devLine, styles.devError]} numberOfLines={2}>last error: {feedError}</Text> : null}
+          </View>
+        )}
+        <Text style={[styles.title, { color: colors.text }]}>{emptyMessage}</Text>
+        <Text style={[styles.subtitle, { color: colors.tabIconDefault }]}>{emptySub}</Text>
       </View>
     );
   }
@@ -105,6 +126,15 @@ export default function FeedScreen() {
 
   return (
     <View style={[styles.container, { paddingTop: insets.top + 16 }]}>
+      {__DEV__ && (
+        <View style={styles.devPanel}>
+          <Text style={styles.devLine}>
+            SOURCE: {feedSource === 'supabase' ? 'SB' : feedSource === 'supabase_error' ? 'SB_ERR' : 'MOCK'}
+          </Text>
+          <Text style={styles.devLine}>campaigns loaded: {questions.length}</Text>
+          {feedError ? <Text style={[styles.devLine, styles.devError]} numberOfLines={2}>last error: {feedError}</Text> : null}
+        </View>
+      )}
       <Text style={[styles.header, { color: textColor }]}>Feed</Text>
 
       <View style={styles.stack}>
@@ -166,6 +196,16 @@ export default function FeedScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, paddingHorizontal: 24 },
+  devPanel: {
+    marginBottom: 12,
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: '#e8f4f8',
+    borderWidth: 1,
+    borderColor: '#b8d4e0',
+  },
+  devLine: { fontSize: 11, fontFamily: 'monospace' },
+  devError: { color: '#c00', marginTop: 4 },
   header: { fontSize: 28, fontWeight: '700', marginBottom: 24 },
   title: { fontSize: 22, fontWeight: '600', textAlign: 'center', marginTop: 48 },
   subtitle: { fontSize: 16, opacity: 0.7, textAlign: 'center', marginTop: 12 },

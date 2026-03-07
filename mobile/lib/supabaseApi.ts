@@ -4,7 +4,16 @@
 
 import { supabase } from '@/lib/supabase';
 import type { FeedQuestion, MockQuestion } from '@/lib/mockData';
+import { getAvailableQuestions } from '@/lib/mockData';
 import { getAppStore } from '@/store/useAppStore';
+
+export type FeedSource = 'supabase' | 'supabase_error' | 'mock';
+
+export interface FeedQuestionsResult {
+  source: FeedSource;
+  items: FeedQuestion[];
+  error?: string;
+}
 
 /** Entrée d’historique wallet serveur (responses + question lisible via join campaigns). */
 export interface ServerWalletHistoryEntry {
@@ -69,8 +78,8 @@ export interface CampaignRow {
   responses_count?: number;
 }
 
-/** Fetch campaigns actives avec progress < quota (limit 20). Retourne [] en cas d'erreur. */
-export async function fetchActiveCampaigns(): Promise<CampaignRow[]> {
+/** Fetch campaigns actives (status=active, responses_count < quota). Expose erreur pour ne pas fallback mock silencieux. */
+export async function fetchActiveCampaigns(): Promise<{ campaigns: CampaignRow[]; error?: string }> {
   const { data, error } = await supabase
     .from('campaigns')
     .select('id, name, template, question, options, targeting, quota, reward_cents, price_cents, status, created_at, responses_count')
@@ -78,11 +87,12 @@ export async function fetchActiveCampaigns(): Promise<CampaignRow[]> {
     .order('created_at', { ascending: false })
     .limit(50);
   if (error) {
-    console.warn('[Supabase] fetchActiveCampaigns', error.message);
-    return [];
+    if (__DEV__) console.warn('[Supabase] fetchActiveCampaigns', error.message);
+    return { campaigns: [], error: error.message };
   }
   const rows = (data ?? []) as CampaignRow[];
-  return rows.filter((c) => (c.responses_count ?? 0) < c.quota).slice(0, 20);
+  const campaigns = rows.filter((c) => (c.responses_count ?? 0) < c.quota).slice(0, 20);
+  return { campaigns };
 }
 
 /** Une campagne par ID (pour l'écran Answer). */
@@ -139,40 +149,50 @@ function asArray(v: unknown): string[] {
 }
 
 /**
- * Récupère les questions feed : Supabase campaigns (actives, non répondues) ou fallback mock.
- * Ne jette pas : en cas d'erreur retourne [] pour que le caller utilise le mock.
+ * Récupère le feed avec source explicite : supabase (même vide), supabase_error, ou mock si SB non configuré.
  */
-export async function getFeedQuestions(): Promise<FeedQuestion[]> {
+export async function getFeedQuestionsWithSource(): Promise<FeedQuestionsResult> {
+  if (!isSupabaseConfigured()) {
+    return { source: 'mock', items: getAvailableQuestions() };
+  }
+
   try {
     const store = getAppStore();
     const history = store.history ?? [];
     const answeredIdsFromHistory: string[] = history.map((h) => {
       if (h == null || typeof h !== 'object') return '';
       const id = 'questionId' in h ? h.questionId : 'campaignId' in h ? (h as { campaignId?: string }).campaignId : null;
-      if (id == null) return '';
-      const s = String(id);
-      return s || '';
+      return id != null ? String(id) : '';
     }).filter(Boolean);
 
-    const [campaigns, myAnsweredRaw] = await Promise.all([
+    const [campRes, myAnsweredRaw] = await Promise.all([
       fetchActiveCampaigns(),
       fetchMyAnsweredCampaignIds(),
     ]);
+
+    if (campRes.error) {
+      if (__DEV__) console.warn('[Supabase] feed', campRes.error);
+      return { source: 'supabase_error', error: campRes.error, items: [] };
+    }
+
     const myAnsweredIds: string[] = asArray(myAnsweredRaw);
     const answeredIds: string[] = [...answeredIdsFromHistory, ...myAnsweredIds];
-
-    if (!Array.isArray(campaigns)) {
-      if (__DEV__) console.warn('[Supabase] getFeedQuestions: campaigns not an array', typeof campaigns);
-      return [];
-    }
-    const available = campaigns.filter((c) => c && !answeredIds.includes(String(c.id)));
-    if (available.length > 0) {
-      return available.map(campaignToFeedQuestion);
-    }
+    const available = campRes.campaigns.filter((c) => c && !answeredIds.includes(String(c.id)));
+    const items = available.map(campaignToFeedQuestion);
+    return { source: 'supabase', items };
   } catch (e) {
-    console.warn('[Supabase] getFeedQuestions fallback to mock', e);
+    const msg = e instanceof Error ? e.message : String(e);
+    if (__DEV__) console.warn('[Supabase] getFeedQuestionsWithSource', e);
+    return { source: 'supabase_error', error: msg, items: [] };
   }
-  return [];
+}
+
+/**
+ * @deprecated Utiliser getFeedQuestionsWithSource() pour distinguer SB vide / erreur / mock.
+ */
+export async function getFeedQuestions(): Promise<FeedQuestion[]> {
+  const res = await getFeedQuestionsWithSource();
+  return res.items;
 }
 
 export interface WalletFromSupabase {
