@@ -4,6 +4,9 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { getCampaignStats, getCampaignQualityStats, updateCampaignStatus, duplicateCampaign, validateCampaignPayouts, exportCampaignResponses, type ExportCampaignResponseRow } from "@/src/lib/supabaseCampaigns";
+import { getCampaignTimeToQuota, formatTimeToQuota } from "@/src/lib/pilotKpis";
+import { buildCampaignProofPack, proofPackToMarkdown } from "@/src/lib/campaignProof";
+import { fetchCampaignQualityDeep, buildCampaignQualityInsights } from "@/src/lib/campaignQualityInsights";
 import { supabase, getOrgMembership } from "@/src/lib/supabase";
 
 type Stats = Awaited<ReturnType<typeof getCampaignStats>>;
@@ -27,7 +30,10 @@ export default function CampaignDetailPage() {
     role: null,
   });
   const [qualityStats, setQualityStats] = useState<Awaited<ReturnType<typeof getCampaignQualityStats>>>(null);
+  const [qualityDeep, setQualityDeep] = useState<Awaited<ReturnType<typeof fetchCampaignQualityDeep>>>(null);
+  const [timeToQuota, setTimeToQuota] = useState<Awaited<ReturnType<typeof getCampaignTimeToQuota>>>(null);
   const [exportToast, setExportToast] = useState<"csv" | "json" | null>(null);
+  const [proofCopyToast, setProofCopyToast] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const [exportLoading, setExportLoading] = useState(false);
   const [duplicateError, setDuplicateError] = useState<"insufficient_org_credit" | "failed" | null>(null);
@@ -37,6 +43,8 @@ export default function CampaignDetailPage() {
     setLoading(true);
     getCampaignStats(id).then(setStats).finally(() => setLoading(false));
     getCampaignQualityStats(id).then(setQualityStats);
+    fetchCampaignQualityDeep(id).then(setQualityDeep);
+    getCampaignTimeToQuota(id).then(setTimeToQuota);
   };
 
   useEffect(() => {
@@ -222,7 +230,55 @@ export default function CampaignDetailPage() {
     pendingCount = 0,
     availableCount = 0,
     source = "mock",
+    costTotalCents,
   } = stats;
+
+  const proofPack =
+    campaign.status === "completed"
+      ? buildCampaignProofPack({
+          campaignName: campaign.name ?? "Sans titre",
+          question: campaign.question,
+          campaignCreatedAt: campaign.createdAt ?? "",
+          status: campaign.status,
+          quota,
+          responsesCount,
+          costTotalCents,
+          qualityPctValid: qualityStats?.pct_valid,
+          qualityPctTooFast: qualityStats?.pct_too_fast,
+          qualityPctEmpty: qualityStats?.pct_empty,
+          timeToQuotaSeconds: timeToQuota?.time_to_quota_seconds,
+          quotaReached: timeToQuota?.quota_reached,
+        })
+      : null;
+
+  const handleCopyProof = () => {
+    if (!proofPack) return;
+    const text = proofPackToMarkdown(proofPack);
+    void navigator.clipboard.writeText(text).then(() => {
+      setProofCopyToast(true);
+      setTimeout(() => setProofCopyToast(false), 2500);
+    });
+  };
+
+  const qualityInsights =
+    responsesCount > 0
+      ? buildCampaignQualityInsights({
+          total_responses: qualityStats?.total_responses ?? responsesCount,
+          valid_responses: qualityStats?.valid_responses ?? 0,
+          invalid_responses: qualityStats?.invalid_responses ?? 0,
+          pct_valid: qualityStats?.pct_valid ?? 0,
+          pct_too_fast: qualityStats?.pct_too_fast ?? 0,
+          pct_empty: qualityStats?.pct_empty ?? 0,
+          avg_duration_ms: qualityDeep?.avg_duration_ms ?? null,
+          flags_count: qualityDeep?.flags_count ?? 0,
+          distribution,
+          trustAvg,
+          responsesCount,
+          quota,
+          timeToQuotaSeconds: timeToQuota?.time_to_quota_seconds ?? null,
+          status: campaign.status,
+        })
+      : null;
 
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
@@ -262,6 +318,11 @@ export default function CampaignDetailPage() {
         {exportToast && (
           <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 px-4 py-3 text-sm font-medium text-emerald-800 dark:text-emerald-200">
             {exportToast === "csv" ? "Export CSV généré." : "Export JSON généré."}
+          </div>
+        )}
+        {proofCopyToast && (
+          <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 px-4 py-3 text-sm font-medium text-emerald-800 dark:text-emerald-200">
+            Résumé preuve copié dans le presse-papiers.
           </div>
         )}
 
@@ -339,8 +400,9 @@ export default function CampaignDetailPage() {
             onClick={handleDuplicate}
             disabled={actionLoading}
             className="rounded-lg border border-zinc-300 dark:border-zinc-600 text-zinc-700 dark:text-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-50"
+            title="Crée une copie en brouillon (même question, quota, récompense). Vous pourrez modifier puis publier."
           >
-            Dupliquer
+            Créer une V2
           </button>
           {campaign.templateKey && (
             <button
@@ -348,6 +410,7 @@ export default function CampaignDetailPage() {
               onClick={handleDuplicateVariant}
               disabled={actionLoading}
               className="rounded-lg border border-zinc-300 dark:border-zinc-600 text-zinc-700 dark:text-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-50"
+              title="Dupliquer avec une question variante pour test A/B"
             >
               Créer variante A/B
             </button>
@@ -382,6 +445,53 @@ export default function CampaignDetailPage() {
             Exporter JSON
           </button>
         </div>
+
+        {proofPack && (
+          <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <h3 className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                Résumé preuve
+              </h3>
+              {proofPack.goodProofCandidate && (
+                <span className="rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300 px-2 py-0.5 text-xs font-medium">
+                  Bonne preuve potentielle
+                </span>
+              )}
+            </div>
+            <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-2">
+              {proofPack.summaryShort}
+            </p>
+            <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100 mb-3">
+              Chiffre fort : {proofPack.headlineNumber}
+            </p>
+            <button
+              type="button"
+              onClick={handleCopyProof}
+              className="rounded-lg border border-zinc-300 dark:border-zinc-600 text-zinc-700 dark:text-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50 dark:hover:bg-zinc-800"
+            >
+              Copier le résumé (Markdown)
+            </button>
+          </div>
+        )}
+
+        {campaign.status === "completed" && (
+          <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
+            <h3 className="text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">
+              Et ensuite ?
+            </h3>
+            <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-3">
+              Relancez un test à partir de cette campagne : créez une V2 en brouillon, ajustez si besoin puis publiez.
+            </p>
+            <button
+              type="button"
+              onClick={handleDuplicate}
+              disabled={actionLoading}
+              className="rounded-lg bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 px-4 py-2 text-sm font-medium hover:opacity-90 disabled:opacity-50"
+            >
+              Créer une V2
+            </button>
+          </div>
+        )}
 
         {validateResult && (
           <div className="rounded-xl border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-950/30 p-4">
@@ -428,26 +538,120 @@ export default function CampaignDetailPage() {
           </div>
         </div>
 
-        {qualityStats ? (
+        {(timeToQuota != null || (costTotalCents != null && responsesCount > 0)) && (
           <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
             <h3 className="text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-3">
-              Qualité
+              KPI pilot
             </h3>
-            <ul className="space-y-1 text-sm text-zinc-600 dark:text-zinc-400">
-              <li>Qualité: {qualityStats.pct_valid}% valides</li>
-              <li>Trop rapide: {qualityStats.pct_too_fast}%</li>
-              <li>Vides: {qualityStats.pct_empty}%</li>
-            </ul>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-sm">
+              {timeToQuota?.quota_reached && timeToQuota.time_to_quota_seconds != null && (
+                <div>
+                  <p className="text-zinc-500 dark:text-zinc-400">Temps pour quota</p>
+                  <p className="font-medium text-zinc-900 dark:text-zinc-100">
+                    {formatTimeToQuota(timeToQuota.time_to_quota_seconds)}
+                  </p>
+                </div>
+              )}
+              {timeToQuota && !timeToQuota.quota_reached && (
+                <div>
+                  <p className="text-zinc-500 dark:text-zinc-400">Quota</p>
+                  <p className="font-medium text-zinc-900 dark:text-zinc-100">
+                    En cours ({responsesCount} / {quota})
+                  </p>
+                </div>
+              )}
+              {campaign.createdAt && (
+                <div>
+                  <p className="text-zinc-500 dark:text-zinc-400">Lancée le</p>
+                  <p className="font-medium text-zinc-900 dark:text-zinc-100">
+                    {new Date(campaign.createdAt).toLocaleDateString()}
+                  </p>
+                </div>
+              )}
+              {costTotalCents != null && responsesCount > 0 && (
+                <div>
+                  <p className="text-zinc-500 dark:text-zinc-400">Coût réel / réponse</p>
+                  <p className="font-medium text-zinc-900 dark:text-zinc-100">
+                    {((costTotalCents / 100) / responsesCount).toFixed(2)} €
+                  </p>
+                </div>
+              )}
+            </div>
           </div>
-        ) : (
+        )}
+
+        {(qualityStats || qualityInsights) && (
           <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
             <h3 className="text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-3">
-              Qualité
+              Qualité campagne
             </h3>
-            <p className="text-sm text-zinc-500 dark:text-zinc-400">Qualité indisponible</p>
-            {process.env.NODE_ENV === "development" && (
-              <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">DEV: RPC ou vue non disponible / pas encore de réponses</p>
-            )}
+            <div className="space-y-3">
+              {qualityInsights && (
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                      qualityInsights.qualitySignal === "bon"
+                        ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
+                        : qualityInsights.qualitySignal === "faible"
+                          ? "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300"
+                          : "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                    }`}
+                  >
+                    {qualityInsights.qualitySignal === "bon"
+                      ? "Bon"
+                      : qualityInsights.qualitySignal === "faible"
+                        ? "Faible"
+                        : "À surveiller"}
+                  </span>
+                </div>
+              )}
+              {qualityStats && (
+                <ul className="space-y-1 text-sm text-zinc-600 dark:text-zinc-400">
+                  <li>Réponses valides : {qualityStats.pct_valid} %</li>
+                  <li>Trop rapide : {qualityStats.pct_too_fast} %</li>
+                  <li>Vides : {qualityStats.pct_empty} %</li>
+                </ul>
+              )}
+              {qualityInsights?.meanDurationSec != null && (
+                <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                  Temps moyen de réponse : {qualityInsights.meanDurationSec} s
+                </p>
+              )}
+              {qualityInsights && qualityInsights.flagsCount > 0 && (
+                <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                  Réponses flaggées : {qualityInsights.flagsCount} ({Math.round(qualityInsights.flaggedRatio * 100)} %)
+                </p>
+              )}
+              <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                Trust moyen répondants : {trustAvg}
+              </p>
+              {qualityInsights && qualityInsights.topChoices.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1">Top choix</p>
+                  <ul className="space-y-0.5 text-sm text-zinc-600 dark:text-zinc-400">
+                    {qualityInsights.topChoices.slice(0, 5).map(({ choice, count, pct }) => (
+                      <li key={choice} className="flex justify-between gap-2">
+                        <span className="truncate">{choice}</span>
+                        <span>{count} ({pct} %)</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {qualityInsights && qualityInsights.observations.length > 0 && (
+          <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
+            <h3 className="text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-3">
+              À retenir
+            </h3>
+            <ul className="space-y-2 text-sm text-zinc-600 dark:text-zinc-400">
+              {qualityInsights.observations.slice(0, 5).map((obs, i) => (
+                <li key={i}>{obs}</li>
+              ))}
+            </ul>
           </div>
         )}
 

@@ -5,6 +5,7 @@ import { Stack, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
 import 'react-native-reanimated';
+import { ensureDeviceRegistered } from '@/lib/deviceRegistration';
 import { ensureAnonSession, supabase } from '@/lib/supabase';
 import { isSupabaseConfigured } from '@/lib/supabaseApi';
 import { getAppStore } from '@/store/useAppStore';
@@ -65,6 +66,7 @@ function RootLayoutNav() {
       if (cancelled || !isSupabaseConfigured()) return;
       const { data: { user } } = await supabase.auth.getUser();
       if (!user?.id || cancelled) return;
+      ensureDeviceRegistered().catch(() => {});
       const { data: row } = await supabase
         .from('users')
         .select('age_bucket, region, tags, onboarding_completed')

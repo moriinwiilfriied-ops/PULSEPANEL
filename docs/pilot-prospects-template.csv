@@ -1,0 +1,4 @@
+company,website,contact_name,role,linkedin,email,vertical,test_angle,status,next_step,owner,notes,last_contact_at
+EXEMPLE - Marque A,https://exemple-marque-a.fr,Jean Dupont,Founder,linkedin.com/in/jeandupont,jean@exemple-marque-a.fr,E-commerce / DTC,Test packaging 2 options,Message envoyé,Relancer si pas de réponse 5j,Marie,Intéressé par test pack. Envoyé 12/01.,2025-01-12
+EXEMPLE - Agence B,,Sophie Martin,Account,linkedin.com/in/sophiemartin,sophie@agence-b.com,Agence,Souhaite proposer test à un client,Pilot proposé,Attendre signature,Marie,Call démo fait. Envoyé offre 299€.,2025-01-15
+EXEMPLE - Startup C,https://startup-c.io,Alex Bernard,Head of Marketing,linkedin.com/in/alexbernard,alex@startup-c.io,Tech B2C,Test prix 4 paliers,Lead identifié,Envoyer DM,Marie,,2025-01-10

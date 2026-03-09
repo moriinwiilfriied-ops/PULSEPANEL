@@ -20,6 +20,7 @@ import { Text } from '@/components/Themed';
 import { useAppStore } from '@/store/useAppStore';
 import { isSupabaseConfigured, fetchWalletFromSupabase, requestWithdrawal, fetchMyWithdrawals, type WithdrawalRow } from '@/lib/supabaseApi';
 import { supabase } from '@/lib/supabase';
+import { wallet as copy } from '@/lib/uiCopy';
 
 export default function WalletScreen() {
   const insets = useSafeAreaInsets();
@@ -121,21 +122,23 @@ export default function WalletScreen() {
 
   const canWithdraw = useServer && availableVal >= 5 && !withdrawing;
   const withdrawErrorFromApi = (message: string): string => {
-    if (message === 'minimum_500_cents') return 'Montant minimum: 5,00 €';
-    if (message === 'insufficient_balance') return 'Solde insuffisant';
-    return 'Impossible de demander le retrait. Réessayez.';
+    if (message === 'minimum_500_cents') return copy.withdrawMinAmount;
+    if (message === 'insufficient_balance') return copy.withdrawInsufficient;
+    if (message === 'withdrawals_frozen') return copy.withdrawFrozen;
+    if (message === 'daily_withdrawal_request_limit_reached') return copy.withdrawDailyLimit;
+    return copy.withdrawGenericError;
   };
 
   const handleWithdraw = useCallback(async () => {
     if (!useServer || !canWithdraw) return;
     const amount = parseFloat(withdrawAmount.replace(',', '.'));
     if (Number.isNaN(amount) || amount < 5) {
-      setWithdrawError('Montant minimum: 5,00 €');
+      setWithdrawError(copy.withdrawMinAmount);
       return;
     }
     const amountCents = Math.round(amount * 100);
     if (amountCents > Math.round(availableVal * 100)) {
-      setWithdrawError('Solde insuffisant');
+      setWithdrawError(copy.withdrawInsufficient);
       return;
     }
     setWithdrawError(null);
@@ -160,7 +163,7 @@ export default function WalletScreen() {
         ) : undefined
       }
     >
-      <Text style={styles.header}>Wallet</Text>
+      <Text style={styles.header}>{copy.title}</Text>
 
       {__DEV__ && (
         <View style={styles.devIdentity}>
@@ -183,31 +186,31 @@ export default function WalletScreen() {
 
       {useServer && serverWallet && !hasBalanceRow && (
         <View style={styles.noBalanceBanner}>
-          <Text style={styles.noBalanceText}>
-            Aucun solde serveur pour cet utilisateur (répondez à une question SB).
-          </Text>
+          <Text style={styles.noBalanceText}>{copy.noBalanceBanner}</Text>
         </View>
       )}
 
       <View style={styles.cards}>
         <View style={styles.card}>
-          <Text style={styles.cardLabel}>En attente</Text>
+          <Text style={styles.cardLabel}>{copy.pendingLabel}</Text>
+          <Text style={styles.cardHint}>{copy.pendingHint}</Text>
           <Text style={styles.cardValue}>{pendingVal.toFixed(2)} €</Text>
         </View>
         <View style={styles.card}>
-          <Text style={styles.cardLabel}>Disponible</Text>
+          <Text style={styles.cardLabel}>{copy.availableLabel}</Text>
+          <Text style={styles.cardHint}>{copy.availableHint}</Text>
           <Text style={[styles.cardValue, styles.cardValueGreen]}>{availableVal.toFixed(2)} €</Text>
         </View>
       </View>
 
       <View style={styles.totalRow}>
-        <Text style={styles.totalLabel}>Total</Text>
+        <Text style={styles.totalLabel}>{copy.totalLabel}</Text>
         <Text style={styles.totalValue}>{total.toFixed(2)} €</Text>
       </View>
 
       {useServer && (
         <View style={styles.withdrawSection}>
-          <Text style={styles.withdrawTitle}>Retirer</Text>
+          <Text style={styles.withdrawTitle}>{copy.withdrawTitle}</Text>
           <TextInput
             style={styles.withdrawInput}
             value={withdrawAmount}
@@ -222,12 +225,12 @@ export default function WalletScreen() {
             disabled={!canWithdraw || withdrawing}
           >
             <Text style={styles.withdrawBtnText}>
-              {withdrawing ? 'Envoi…' : 'Demander un retrait'}
+              {withdrawing ? copy.withdrawSending : copy.withdrawButton}
             </Text>
           </TouchableOpacity>
           {withdrawError ? <Text style={styles.withdrawError}>{withdrawError}</Text> : null}
           {useServer && availableVal < 5 && availableVal > 0 && (
-            <Text style={styles.withdrawHint}>Disponible &lt; 5 € : retrait désactivé.</Text>
+            <Text style={styles.withdrawHint}>{copy.withdrawHintMin}</Text>
           )}
         </View>
       )}
@@ -271,9 +274,9 @@ export default function WalletScreen() {
 
       {useServer && (
         <>
-          <Text style={styles.historyTitle}>Mes retraits</Text>
+          <Text style={styles.historyTitle}>{copy.myWithdrawalsTitle}</Text>
           {myWithdrawals.length === 0 ? (
-            <Text style={styles.empty}>Aucun retrait pour l'instant.</Text>
+            <Text style={styles.empty}>{copy.emptyWithdrawals}</Text>
           ) : (
             <View style={styles.withdrawalsListBlock}>
             {myWithdrawals.map((w) => (
@@ -290,7 +293,7 @@ export default function WalletScreen() {
                 <View style={styles.historyRight}>
                   <View style={[styles.badge, w.status === 'paid' ? styles.badgeOk : w.status === 'rejected' ? styles.badgeRejected : styles.badgePending]}>
                     <Text style={styles.badgeText}>
-                      {w.status === 'pending' ? 'En attente' : w.status === 'paid' ? 'Payé' : 'Refusé'}
+                      {w.status === 'pending' ? copy.statusPending : w.status === 'paid' ? copy.statusPaid : copy.statusRejected}
                     </Text>
                   </View>
                 </View>
@@ -301,9 +304,9 @@ export default function WalletScreen() {
         </>
       )}
 
-      <Text style={styles.historyTitle}>Historique</Text>
+      <Text style={styles.historyTitle}>{copy.historyTitle}</Text>
       {historyList.length === 0 ? (
-        <Text style={styles.empty}>Aucune réponse encore.</Text>
+        <Text style={styles.empty}>{copy.emptyHistory}</Text>
       ) : useServer ? (
         (serverWallet?.history ?? []).map((entry) => (
           <View key={entry.id} style={styles.historyRow}>
@@ -314,7 +317,7 @@ export default function WalletScreen() {
             <View style={styles.historyRight}>
               <Text style={styles.historyReward}>+{(entry.rewardCents / 100).toFixed(2)} €</Text>
               <View style={[styles.badge, entry.payoutStatus === 'available' ? styles.badgeOk : styles.badgePending]}>
-                <Text style={styles.badgeText}>{entry.payoutStatus === 'available' ? 'Disponible' : 'En attente'}</Text>
+                <Text style={styles.badgeText}>{entry.payoutStatus === 'available' ? copy.statusAvailable : copy.statusPending}</Text>
               </View>
             </View>
           </View>
@@ -329,7 +332,7 @@ export default function WalletScreen() {
             <View style={styles.historyRight}>
               <Text style={styles.historyReward}>+{entry.reward.toFixed(2)} €</Text>
               <View style={[styles.badge, entry.status === 'available' ? styles.badgeOk : styles.badgePending]}>
-                <Text style={styles.badgeText}>{entry.status === 'available' ? 'Disponible' : 'En attente'}</Text>
+                <Text style={styles.badgeText}>{entry.status === 'available' ? copy.statusAvailable : copy.statusPending}</Text>
               </View>
             </View>
           </View>
@@ -377,7 +380,8 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 20,
   },
-  cardLabel: { fontSize: 14, color: '#666', marginBottom: 4 },
+  cardLabel: { fontSize: 14, color: '#666', marginBottom: 2 },
+  cardHint: { fontSize: 11, color: '#888', marginBottom: 6 },
   cardValue: { fontSize: 24, fontWeight: '700' },
   cardValueGreen: { color: '#0a0' },
   totalRow: {

@@ -40,6 +40,33 @@ export interface UserOnboardingRow {
   onboarding_completed: boolean;
 }
 
+/** Trust affiché depuis la DB (users.trust_level / users.trust_score). Lecture propre RLS own. */
+export interface UserTrustRow {
+  trust_level: string | null;
+  trust_score: number | null;
+}
+
+/** Récupère trust_level et trust_score de l’utilisateur courant (public.users). Source de vérité pour le profil. */
+export async function fetchUserTrust(): Promise<UserTrustRow | null> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+  const { data, error } = await supabase
+    .from('users')
+    .select('trust_level, trust_score')
+    .eq('id', user.id)
+    .maybeSingle();
+  if (error) {
+    if (__DEV__) console.warn('[Supabase] fetchUserTrust', error.message);
+    return null;
+  }
+  if (!data) return null;
+  const row = data as { trust_level?: string | null; trust_score?: number | null };
+  return {
+    trust_level: row.trust_level ?? null,
+    trust_score: row.trust_score ?? null,
+  };
+}
+
 /** Upsert public.users au submit onboarding (id = auth.uid()). */
 export async function upsertUserOnboarding(params: {
   ageBucket: string;
@@ -281,6 +308,18 @@ export async function fetchWalletFromSupabase(): Promise<WalletFromSupabase | nu
   };
 }
 
+/** Message utilisateur pour les erreurs de plafond journalier (réponse). */
+export function responseLimitErrorToMessage(message: string | undefined): string | null {
+  if (!message) return null;
+  if (message.includes('daily_response_count_limit_reached')) {
+    return "Tu as atteint ta limite de réponses pour aujourd'hui. Reviens plus tard.";
+  }
+  if (message.includes('daily_reward_limit_reached')) {
+    return "Tu as atteint ton plafond de gains pour aujourd'hui. Reviens plus tard.";
+  }
+  return null;
+}
+
 /** Insert response ; le crédit pending est fait par le trigger DB. Puis refetch wallet. */
 export async function submitResponseToSupabase(params: {
   campaignId: string;
@@ -352,6 +391,28 @@ export async function requestWithdrawal(amountCents: number): Promise<{
     amount_cents: obj?.amount_cents,
     status: obj?.status,
   };
+}
+
+/** Statut des plafonds journaliers (jour UTC). */
+export interface UserDailyLimitStatus {
+  trust_level: string;
+  valid_responses_today: number;
+  reward_cents_today: number;
+  withdrawal_requests_today: number;
+  max_valid_responses_per_day: number;
+  max_reward_cents_per_day: number;
+  max_withdrawal_requests_per_day: number;
+  remaining_valid_responses_today: number;
+  remaining_reward_cents_today: number;
+  remaining_withdrawal_requests_today: number;
+  shared_device_users_count?: number;
+  open_flags_count?: number;
+}
+
+export async function fetchUserDailyLimitStatus(): Promise<UserDailyLimitStatus | null> {
+  const { data, error } = await supabase.rpc('get_user_daily_limit_status');
+  if (error || !data || (data as { error?: string }).error) return null;
+  return data as UserDailyLimitStatus;
 }
 
 /** Liste des 20 derniers retraits de l'utilisateur (RLS). */

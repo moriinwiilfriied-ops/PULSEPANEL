@@ -1,0 +1,4 @@
+source_name,source_type,owner,status,date_started,est_users,actual_users,trust_quality_note,fraud_note,keep_or_cut,next_step,notes
+EXEMPLE - Discord Étudiants,Discord,Marie,Qualité OK,2025-01-10,50,42,Bon taux valides campagne 1. Peu de flags.,Aucun device partagé suspect.,keep,Scaler si prochaine campagne besoin.,Serveur X channel #jobs
+EXEMPLE - Reel TikTok,TikTok organique,Marie,Source à surveiller,2025-01-15,80,65,Quelques too_fast. À revoir dans 7j.,1 user gel après revue.,surveiller,Revoir flags dans 7j.,Lien UTM reel_jan15
+EXEMPLE - Micro-influenceur A,Micro-influenceur,Marie,Premiers users arrivés,2025-01-18,40,,En attente première campagne.,,—,Lancer campagne test puis évaluer.,Partenaire 8K abonnés

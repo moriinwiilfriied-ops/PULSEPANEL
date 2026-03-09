@@ -14,6 +14,7 @@ import {
   templateKeyToLegacyTemplate,
   type CampaignTemplatePreset,
 } from "@/src/lib/campaignTemplates";
+import { campaignCreate as createCopy } from "@/src/lib/uiCopy";
 
 const REGIONS = [
   "Île-de-France",
@@ -399,7 +400,7 @@ export default function NewCampaignPage() {
           {submitError === "insufficient_org_credit" && (
             <div className="rounded-xl border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/30 p-4">
               <p className="text-sm font-medium text-red-800 dark:text-red-200">
-                Crédit insuffisant. Rechargez votre compte entreprise.
+                {createCopy.insufficientCredit}
               </p>
               <Link
                 href="/"
@@ -412,7 +413,7 @@ export default function NewCampaignPage() {
           {submitError === "creation_failed" && (
             <div>
               <p className="text-sm text-red-600 dark:text-red-400">
-                Création impossible.
+                {createCopy.creationFailed}
               </p>
               {process.env.NODE_ENV === "development" && submitErrorMessage && (
                 <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 font-mono">

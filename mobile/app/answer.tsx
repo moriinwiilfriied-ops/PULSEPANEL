@@ -20,7 +20,8 @@ import { Text } from '@/components/Themed';
 import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
 import { mockQuestions, submitAnswer, type MockQuestion } from '@/lib/mockData';
-import { fetchCampaignById, submitResponseToSupabase } from '@/lib/supabaseApi';
+import { fetchCampaignById, submitResponseToSupabase, responseLimitErrorToMessage } from '@/lib/supabaseApi';
+import { answer as copy } from '@/lib/uiCopy';
 
 export default function AnswerScreen() {
   const insets = useSafeAreaInsets();
@@ -41,6 +42,7 @@ export default function AnswerScreen() {
   const [step, setStep] = useState<'form' | 'reward'>('form');
   const [rewardAmount, setRewardAmount] = useState(0);
   const [answerStartedAt, setAnswerStartedAt] = useState<number | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!questionId || question) return;
@@ -100,6 +102,7 @@ export default function AnswerScreen() {
     const isSupabase = /^[0-9a-f-]{36}$/i.test(question.id);
     const durationMs = answerStartedAt != null ? Math.round(Date.now() - answerStartedAt) : undefined;
     if (isSupabase) {
+      setSubmitError(null);
       const { error, reward } = await submitResponseToSupabase({
         campaignId: question.id,
         question: question.question,
@@ -108,6 +111,8 @@ export default function AnswerScreen() {
         rewardCents: Math.round(question.reward * 100),
       });
       if (error) {
+        const friendly = responseLimitErrorToMessage(error.message);
+        setSubmitError(friendly ?? copy.submitErrorDefault);
         return;
       }
       setRewardAmount(reward ?? question.reward);
@@ -171,6 +176,11 @@ export default function AnswerScreen() {
           />
         )}
 
+        {submitError ? (
+          <View style={[styles.errorBox, { backgroundColor: colorScheme === 'dark' ? 'rgba(200,80,80,0.2)' : 'rgba(200,80,80,0.1)', borderColor: '#c44' }]}>
+            <Text style={styles.errorText}>{submitError}</Text>
+          </View>
+        ) : null}
         {(question.type === 'choice' || question.type === 'poll') && question.options && (
           <View style={styles.options}>
             {question.options.map((opt) => {
@@ -218,6 +228,8 @@ const styles = StyleSheet.create({
   link: { color: '#2f95dc', marginTop: 16 },
   question: { fontSize: 20, fontWeight: '600', marginBottom: 8 },
   typeLabel: { fontSize: 12, color: '#888', marginBottom: 20, textTransform: 'capitalize' },
+  errorBox: { padding: 12, borderRadius: 8, borderWidth: 1, marginBottom: 16 },
+  errorText: { fontSize: 14, color: '#c44' },
   textInput: {
     borderWidth: 1,
     borderColor: '#ddd',

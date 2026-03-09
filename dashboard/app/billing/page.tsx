@@ -8,17 +8,8 @@ import {
   type OrgBalance,
   type OrgLedgerRow,
 } from "@/src/lib/supabase";
-
-const REASON_LABELS: Record<string, string> = {
-  stripe_checkout: "Recharge Stripe",
-  topup_dev: "Recharge (DEV)",
-  campaign_prepaid: "Débit campagne",
-};
-
-function reasonToLabel(reason: string | null): string {
-  if (!reason) return "—";
-  return REASON_LABELS[reason] ?? reason;
-}
+import { getLedgerReasonLabel } from "@/src/lib/ledgerReasonLabels";
+import { common, billing as copy } from "@/src/lib/uiCopy";
 
 function formatEuros(cents: number): string {
   const value = Math.abs(cents) / 100;
@@ -51,7 +42,28 @@ function campaignDisplay(row: OrgLedgerRow): string {
   return "—";
 }
 
-function downloadBlob(filename: string, blob: Blob): void {
+function addUtf8Bom(s: string): string {
+  return "\uFEFF" + s;
+}
+
+function csvEscape(value: unknown): string {
+  const s = value === null || value === undefined ? "" : String(value);
+  return s.includes(",") || s.includes('"') ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function toCsv(
+  rows: Array<Record<string, string | number | null | undefined>>,
+  headers: string[]
+): string {
+  const headerLine = headers.map((h) => csvEscape(h)).join(",");
+  const dataLines = rows.map((row) =>
+    headers.map((h) => csvEscape(row[h])).join(",")
+  );
+  return [headerLine, ...dataLines].join("\r\n");
+}
+
+function downloadTextFile(filename: string, mime: string, content: string): void {
+  const blob = new Blob([content], { type: mime });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -59,6 +71,8 @@ function downloadBlob(filename: string, blob: Blob): void {
   a.click();
   URL.revokeObjectURL(url);
 }
+
+const CSV_HEADERS = ["created_at", "label", "amount_eur", "campaign_title_or_id"] as const;
 
 export default function BillingPage() {
   const [orgId, setOrgId] = useState<string | null>(null);
@@ -93,15 +107,52 @@ export default function BillingPage() {
           }
         });
       })
-      .catch(() => setError("Impossible de charger la facturation."))
+      .catch(() => setError(copy.loadError))
       .finally(() => setLoading(false));
   }, []);
+
+  const handleExportCsv = useCallback(() => {
+    if (ledger.length === 0) {
+      setToast("Rien à exporter.");
+      return;
+    }
+    const rows: Array<Record<string, string | number | null | undefined>> = ledger.map((row) => ({
+      created_at: formatDate(row.created_at),
+      label: getLedgerReasonLabel(row.reason),
+      amount_eur: (row.amount_cents / 100).toFixed(2).replace(".", ","),
+      campaign_title_or_id: campaignDisplay(row),
+    }));
+    const csv = toCsv(rows, [...CSV_HEADERS]);
+    downloadTextFile("facturation-transactions.csv", "text/csv;charset=utf-8", addUtf8Bom(csv));
+    setToast("Export CSV généré.");
+  }, [ledger]);
+
+  const handleExportJson = useCallback(() => {
+    if (ledger.length === 0) {
+      setToast("Rien à exporter.");
+      return;
+    }
+    const json = JSON.stringify(ledger, null, 2);
+    downloadTextFile("facturation-transactions.json", "application/json", json);
+    setToast("Export JSON généré.");
+  }, [ledger]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 3000);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  /* Hooks must stay above conditional returns */
+
+  const availableCents = balance?.available_cents ?? 0;
+  const spentCents = balance?.spent_cents ?? 0;
 
   if (loading) {
     return (
       <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
         <main className="mx-auto max-w-4xl px-6 py-8">
-          <p className="text-zinc-500 dark:text-zinc-400 py-8">Chargement…</p>
+          <p className="text-zinc-500 dark:text-zinc-400 py-8">{common.loading}</p>
         </main>
       </div>
     );
@@ -121,47 +172,11 @@ export default function BillingPage() {
     return (
       <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
         <main className="mx-auto max-w-4xl px-6 py-8">
-          <p className="text-zinc-600 dark:text-zinc-400">Connectez-vous.</p>
+          <p className="text-zinc-600 dark:text-zinc-400">{common.connectRequired}</p>
         </main>
       </div>
     );
   }
-
-  const availableCents = balance?.available_cents ?? 0;
-  const spentCents = balance?.spent_cents ?? 0;
-
-  const handleExportCsv = useCallback(() => {
-    if (ledger.length === 0) {
-      setToast("Rien à exporter.");
-      return;
-    }
-    const header = "created_at,label,amount_eur,campaign_title_or_id";
-    const rows = ledger.map((row) => {
-      const label = reasonToLabel(row.reason);
-      const amountEur = (row.amount_cents / 100).toFixed(2).replace(".", ",");
-      const campaign = campaignDisplay(row);
-      const escaped = (s: string) =>
-        s.includes(",") || s.includes('"') ? `"${s.replace(/"/g, '""')}"` : s;
-      return [formatDate(row.created_at), escaped(label), amountEur, escaped(campaign)].join(",");
-    });
-    const csv = [header, ...rows].join("\r\n");
-    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
-    downloadBlob("facturation-transactions.csv", blob);
-    setToast("Export CSV généré.");
-    setTimeout(() => setToast(null), 3000);
-  }, [ledger]);
-
-  const handleExportJson = useCallback(() => {
-    if (ledger.length === 0) {
-      setToast("Rien à exporter.");
-      return;
-    }
-    const json = JSON.stringify(ledger, null, 2);
-    const blob = new Blob([json], { type: "application/json" });
-    downloadBlob("facturation-transactions.json", blob);
-    setToast("Export JSON généré.");
-    setTimeout(() => setToast(null), 3000);
-  }, [ledger]);
 
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
@@ -221,7 +236,7 @@ export default function BillingPage() {
         )}
         {ledger.length === 0 ? (
           <p className="text-zinc-500 dark:text-zinc-400 py-4">
-            Aucune transaction.
+            {copy.emptyLedger}
           </p>
         ) : (
           <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-hidden">
@@ -252,7 +267,7 @@ export default function BillingPage() {
                       {formatDate(row.created_at)}
                     </td>
                     <td className="px-4 py-3 text-zinc-700 dark:text-zinc-300">
-                      {reasonToLabel(row.reason)}
+                      {getLedgerReasonLabel(row.reason)}
                     </td>
                     <td
                       className={`px-4 py-3 text-right font-medium ${

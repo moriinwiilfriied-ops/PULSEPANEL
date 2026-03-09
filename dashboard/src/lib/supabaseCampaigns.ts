@@ -149,10 +149,12 @@ export async function getCampaignStats(campaignId: string): Promise<{
   pendingCount?: number;
   availableCount?: number;
   source: "supabase" | "mock";
+  /** Coût total facturé (centimes), depuis DB. undefined si mock ou non dispo. */
+  costTotalCents?: number;
 } | null> {
   const { data: campaignRow, error: campError } = await supabase
     .from("campaigns")
-    .select("id, org_id, name, template, template_key, template_version, question, options, targeting, quota, reward_cents, price_cents, status, created_at, responses_count")
+    .select("id, org_id, name, template, template_key, template_version, question, options, targeting, quota, reward_cents, price_cents, cost_total_cents, status, created_at, responses_count")
     .eq("id", campaignId)
     .single();
   if (campError || !campaignRow) {
@@ -190,6 +192,7 @@ export async function getCampaignStats(campaignId: string): Promise<{
   });
   const trustAvg = verbatims.length ? verbatims.reduce((s, v) => s + v.trustLevel, 0) / verbatims.length : 0;
   const qualityBadge = trustAvg >= 80 ? "Haute" : trustAvg >= 60 ? "Moyenne" : "À améliorer";
+  const row = campaignRow as CampaignRow & { cost_total_cents?: number };
   return {
     campaign,
     responsesCount,
@@ -201,6 +204,7 @@ export async function getCampaignStats(campaignId: string): Promise<{
     pendingCount,
     availableCount,
     source: "supabase",
+    costTotalCents: row.cost_total_cents,
   };
 }
 
@@ -324,7 +328,10 @@ export type DuplicateCampaignResult =
   | { error: "failed"; message?: string }
   | null;
 
-/** Dupliquer une campagne (même org, status active). Facturation au passage en active. */
+/**
+ * Dupliquer une campagne (même org uniquement). La copie est créée en paused (brouillon).
+ * Pas de duplication des réponses, flags, coûts ou ledger. Facturation uniquement au passage en active.
+ */
 export async function duplicateCampaign(
   campaignId: string,
   overrides?: { nameSuffix?: string; question?: string }
@@ -335,26 +342,30 @@ export async function duplicateCampaign(
     .from("campaigns")
     .select("name, template, template_key, template_version, question, options, targeting, quota, reward_cents, price_cents")
     .eq("id", campaignId)
+    .eq("org_id", orgId)
     .single();
   if (fetchErr || !source) return null;
-  const name = (source.name ?? "Copie") + (overrides?.nameSuffix ?? " (copie)");
+  const nameSuffix = overrides?.nameSuffix ?? " — V2";
+  const name = (source.name ?? "Copie").trim() + nameSuffix;
   const question = overrides?.question ?? source.question;
+  const insertPayload: Record<string, unknown> = {
+    org_id: orgId,
+    name,
+    template: source.template,
+    template_key: source.template_key ?? null,
+    template_version: source.template_version ?? 1,
+    question,
+    options: source.options ?? [],
+    targeting: source.targeting ?? {},
+    quota: source.quota,
+    reward_cents: source.reward_cents,
+    price_cents: source.price_cents,
+    status: "paused",
+    source_campaign_id: campaignId,
+  };
   const { data: created, error: insertErr } = await supabase
     .from("campaigns")
-    .insert({
-      org_id: orgId,
-      name,
-      template: source.template,
-      template_key: source.template_key ?? null,
-      template_version: source.template_version ?? 1,
-      question,
-      options: source.options ?? [],
-      targeting: source.targeting ?? {},
-      quota: source.quota,
-      reward_cents: source.reward_cents,
-      price_cents: source.price_cents,
-      status: "active",
-    })
+    .insert(insertPayload)
     .select("id, org_id, name, template, template_key, template_version, question, options, targeting, quota, reward_cents, price_cents, status, created_at, responses_count")
     .single();
   if (insertErr) {

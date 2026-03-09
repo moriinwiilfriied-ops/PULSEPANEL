@@ -19,6 +19,7 @@ import Colors from '@/constants/Colors';
 import { getAvailableQuestions, type FeedQuestion } from '@/lib/mockData';
 import { getFeedQuestionsWithSource, type FeedSource } from '@/lib/supabaseApi';
 import { useAppStore } from '@/store/useAppStore';
+import { feed as copy } from '@/lib/uiCopy';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CARD_WIDTH = SCREEN_WIDTH - 48;
@@ -91,14 +92,14 @@ export default function FeedScreen() {
 
   const emptyMessage =
     feedSource === 'supabase_error'
-      ? 'Impossible de charger les campagnes.'
+      ? copy.emptyLoadError
       : feedSource === 'supabase'
-        ? 'Aucune campagne disponible pour le moment.'
-        : 'Plus de questions pour l\'instant.';
+        ? copy.emptyNoCampaigns
+        : copy.emptyMock;
   const emptySub =
     feedSource === 'supabase_error'
-      ? (__DEV__ && feedError ? feedError : 'Vérifiez votre connexion ou réessayez.')
-      : 'Revenez plus tard pour gagner des récompenses.';
+      ? copy.emptySubError
+      : copy.emptySubDefault;
 
   if (questions.length === 0) {
     return (
@@ -135,7 +136,7 @@ export default function FeedScreen() {
           {feedError ? <Text style={[styles.devLine, styles.devError]} numberOfLines={2}>last error: {feedError}</Text> : null}
         </View>
       )}
-      <Text style={[styles.header, { color: textColor }]}>Feed</Text>
+        <Text style={[styles.header, { color: textColor }]}>{copy.title}</Text>
 
       <View style={styles.stack}>
         {questions.slice(currentIndex, currentIndex + 2).reverse().map((q, i) => (
