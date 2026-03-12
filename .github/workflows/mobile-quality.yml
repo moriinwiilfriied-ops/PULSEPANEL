@@ -1,0 +1,58 @@
+# Gates qualité mobile : typecheck + lint.
+# E2E Maestro : exécution locale uniquement (nécessite app + simulateur/émulateur ou Maestro Cloud).
+name: Mobile quality
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'mobile/**'
+      - '.github/workflows/mobile-quality.yml'
+  pull_request:
+    branches: [main, master]
+    paths:
+      - 'mobile/**'
+      - '.github/workflows/mobile-quality.yml'
+
+jobs:
+  quality:
+    name: typecheck & lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+  maestro-flows-present:
+    name: Maestro flows (structure)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify Maestro flow files exist
+        run: |
+          count=$(find mobile/.maestro/flows -name "*.yaml" 2>/dev/null | wc -l)
+          if [ "$count" -lt 1 ]; then
+            echo "::error::No Maestro flow YAML in mobile/.maestro/flows"
+            exit 1
+          fi
+          echo "Maestro: $count flow file(s) present (E2E runs locally only)."
