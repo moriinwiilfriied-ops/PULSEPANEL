@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { createBrowserClient } from "@supabase/ssr";
 import { login as copy } from "@/src/lib/uiCopy";
+import { dash } from "@/src/lib/dashboardTheme";
+import { PanelCard } from "@/src/components/ui/PanelCard";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
@@ -60,61 +62,48 @@ export function LoginForm() {
   };
 
   return (
-    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 flex items-center justify-center px-4">
-      <div className="w-full max-w-sm rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-sm">
-        <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100 mb-2">
-          {copy.title}
-        </h1>
-        <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-6">
-          {copy.emailHint}
-        </p>
+    <div className={`${dash.page} flex items-center justify-center px-4`}>
+      <PanelCard className="w-full max-w-sm">
+        <h1 className="text-xl font-semibold text-dash-text mb-1">{copy.title}</h1>
+        {copy.subtitle && (
+          <p className="text-sm text-dash-text-muted mb-4">{copy.subtitle}</p>
+        )}
+        <p className="text-sm text-dash-text-secondary mb-6">{copy.emailHint}</p>
 
         {errorMessage && (
-          <p className="text-sm text-amber-600 dark:text-amber-400 mb-4 rounded-lg bg-amber-50 dark:bg-amber-950/40 px-3 py-2">
+          <p className="text-sm text-amber-400 mb-4 rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2">
             {errorMessage}
           </p>
         )}
 
         {sent ? (
-          <div className="text-sm text-zinc-600 dark:text-zinc-300 space-y-2">
-            <p>Un lien de connexion a été envoyé à <strong>{email}</strong>.</p>
-            <p className="text-zinc-500 dark:text-zinc-400">
-              Cliquez sur le lien dans l'e-mail pour accéder au dashboard.
-            </p>
+          <div className="text-sm text-dash-text-secondary space-y-2">
+            <p>{copy.sentMessage} <strong className="text-dash-text">{email}</strong>{"."}</p>
+            <p className="text-dash-text-muted">{copy.sentHint}</p>
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
-            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-              E-mail
-            </label>
+            <label className="block text-sm font-medium text-dash-text">E-mail</label>
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="vous@exemple.fr"
-              className="w-full rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-4 py-2 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400"
+              className="w-full rounded-lg border border-dash-border bg-dash-surface-2 px-4 py-2 text-dash-text placeholder:text-dash-text-muted focus:outline-none focus:ring-2 focus:ring-dash-accent/30"
               autoComplete="email"
               disabled={loading}
             />
-            {error && (
-              <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
-            )}
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full rounded-lg bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 px-4 py-2 text-sm font-medium hover:opacity-90 disabled:opacity-50"
-            >
+            {error && <p className="text-sm text-dash-danger">{error}</p>}
+            <button type="submit" disabled={loading} className={`w-full ${dash.btn} ${dash.btnPrimary}`}>
               {loading ? copy.buttonSending : copy.buttonSend}
             </button>
           </form>
         )}
 
-        <p className="mt-6 text-center text-sm text-zinc-500 dark:text-zinc-400">
-          <Link href="/" className="hover:underline">
-            Retour à l'accueil
-          </Link>
+        <p className="mt-6 text-center text-sm text-dash-text-muted">
+          <Link href="/" className={dash.link}>{copy.backToHome.replace(/'/g, "\u2019")}</Link>
         </p>
-      </div>
+      </PanelCard>
     </div>
   );
 }

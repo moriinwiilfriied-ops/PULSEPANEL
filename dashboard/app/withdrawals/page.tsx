@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import Link from "next/link";
+import { useCallback, useEffect, useState } from "react";
 import {
   listPendingWithdrawals,
   listRecentWithdrawals,
@@ -9,30 +8,78 @@ import {
   type PendingWithdrawalRow,
   type RecentWithdrawalRow,
 } from "@/src/lib/supabaseCampaigns";
+import { common, withdrawals as copy } from "@/src/lib/uiCopy";
+import { dash } from "@/src/lib/dashboardTheme";
+import { PanelCard } from "@/src/components/ui/PanelCard";
+import { MetricCard } from "@/src/components/ui/MetricCard";
+import { StatusBadge } from "@/src/components/ui/StatusBadge";
 
 type Tab = "pending" | "history";
+
+function formatDate(dateStr: string) {
+  return new Date(dateStr).toLocaleString("fr-FR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatAmount(cents: number): string {
+  return `${(cents / 100).toFixed(2)} €`;
+}
+
+function truncateUserId(uid: string): string {
+  return uid.length > 12 ? `${uid.slice(0, 6)}…${uid.slice(-4)}` : uid;
+}
 
 export default function WithdrawalsPage() {
   const [tab, setTab] = useState<Tab>("pending");
   const [pendingList, setPendingList] = useState<PendingWithdrawalRow[]>([]);
   const [historyList, setHistoryList] = useState<RecentWithdrawalRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [actionId, setActionId] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   const load = useCallback(() => {
+    setError(null);
     setLoading(true);
     Promise.all([listPendingWithdrawals(), listRecentWithdrawals()])
       .then(([pending, history]) => {
         setPendingList(pending);
         setHistoryList(history);
       })
+      .catch(() => setError(copy.loadError))
       .finally(() => setLoading(false));
   }, []);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) {
+        setLoading(true);
+        setError(null);
+      }
+    });
+    Promise.all([listPendingWithdrawals(), listRecentWithdrawals()])
+      .then(([pending, history]) => {
+        if (!cancelled) {
+          setPendingList(pending);
+          setHistoryList(history);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setError(copy.loadError);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleDecide = useCallback(
     async (id: string, decision: "paid" | "rejected") => {
@@ -46,180 +93,146 @@ export default function WithdrawalsPage() {
       }
       setMessage({
         type: "success",
-        text:
-          decision === "paid"
-            ? "Retrait marqué comme payé."
-            : "Retrait refusé. Le montant a été remboursé.",
+        text: decision === "paid" ? copy.successPaid : copy.successRejected,
       });
       load();
     },
     [load]
   );
 
-  const truncateUserId = (uid: string) =>
-    uid.length > 12 ? `${uid.slice(0, 6)}…${uid.slice(-4)}` : uid;
-
-  const formatDate = (dateStr: string) =>
-    new Date(dateStr).toLocaleString("fr-FR", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-
   return (
-    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
-      <header className="border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
-        <div className="mx-auto max-w-4xl px-6 py-4 flex items-center justify-between">
-          <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">
-            PulsePanel
-          </h1>
-          <nav className="flex items-center gap-4">
-            <Link
-              href="/"
-              className="text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100"
-            >
-              Campagnes
-            </Link>
-            <Link
-              href="/withdrawals"
-              className="text-sm font-medium text-zinc-900 dark:text-zinc-100"
-            >
-              Retraits
-            </Link>
-            <Link
-              href="/campaigns/new"
-              className="rounded-lg bg-zinc-900 dark:bg-zinc-100 px-4 py-2 text-sm font-medium text-white dark:text-zinc-900 hover:opacity-90"
-            >
-              Créer une campagne
-            </Link>
-          </nav>
-        </div>
-      </header>
+    <div className={dash.page}>
+      <div className={dash.container}>
+        {/* 1. Header */}
+        <header className={dash.hero + " mb-8 border border-dash-border-subtle/50"}>
+          <h1 className={dash.headlineHero}>{copy.title}</h1>
+          <p className="text-dash-text-secondary mt-2 max-w-2xl text-base">
+            {copy.subtitle}
+          </p>
+        </header>
 
-      <main className="mx-auto max-w-4xl px-6 py-8">
-        <div className="flex gap-2 mb-4">
-          <button
-            type="button"
-            onClick={() => setTab("pending")}
-            className={`rounded-lg px-4 py-2 text-sm font-medium ${
-              tab === "pending"
-                ? "bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900"
-                : "bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-300 dark:hover:bg-zinc-700"
-            }`}
-          >
-            En attente
-          </button>
-          <button
-            type="button"
-            onClick={() => setTab("history")}
-            className={`rounded-lg px-4 py-2 text-sm font-medium ${
-              tab === "history"
-                ? "bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900"
-                : "bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-300 dark:hover:bg-zinc-700"
-            }`}
-          >
-            Historique
-          </button>
-        </div>
-
-        {message && (
-          <div
-            className={`mb-4 rounded-lg px-4 py-3 text-sm ${
-              message.type === "success"
-                ? "bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200"
-                : "bg-red-50 text-red-800 dark:bg-red-900/30 dark:text-red-200"
-            }`}
-          >
-            {message.text}
+        {/* 2. Synthèse : métriques réelles */}
+        {!loading && !error && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
+            <MetricCard label={copy.metricPending} value={String(pendingList.length)} />
+            <MetricCard label={copy.metricHistory} value={String(historyList.length)} />
           </div>
         )}
 
+        {/* 3. Onglets */}
+        <div className="mb-6 flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-dash-text-muted uppercase tracking-wider mr-1">{copy.segmentLabel}</span>
+          {([{ value: "pending" as const, label: copy.tabPending }, { value: "history" as const, label: copy.tabHistory }] as const).map(
+            ({ value, label }) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setTab(value)}
+                className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+                  tab === value
+                    ? "bg-dash-surface-2 text-dash-text shadow-[var(--dash-shadow-sm)]"
+                    : "text-dash-text-muted hover:bg-dash-surface-2/70 hover:text-dash-text-secondary"
+                }`}
+              >
+                {label}
+              </button>
+            )
+          )}
+        </div>
+
+        {/* Message succès / erreur action */}
+        {message && (
+          <PanelCard
+            className={`mb-6 ${message.type === "success" ? "bg-emerald-950/20 border border-emerald-500/20" : "bg-red-950/20 border border-red-500/20"}`}
+          >
+            <p className={`text-sm ${message.type === "success" ? "text-emerald-400" : "text-red-400"}`}>
+              {message.text}
+            </p>
+          </PanelCard>
+        )}
+
+        {/* 4. Corps : loading / error / empty / liste */}
         {loading ? (
-          <p className="text-zinc-500 dark:text-zinc-400 py-8">Chargement…</p>
+          <div className={`${dash.card} p-8 text-center`}>
+            <p className="text-dash-text-muted">{common.loading}</p>
+          </div>
+        ) : error ? (
+          <PanelCard className="py-12 px-6 text-center border border-dash-border-subtle/50">
+            <p className="text-dash-text font-medium mb-1">{common.errorTitle}</p>
+            <p className="text-sm text-dash-text-muted mb-6">{error}</p>
+            <button type="button" onClick={load} className={`rounded-lg ${dash.btn} ${dash.btnSecondary} px-5 py-2.5`}>
+              {copy.retry}
+            </button>
+          </PanelCard>
         ) : tab === "pending" ? (
           pendingList.length === 0 ? (
-            <p className="text-zinc-500 dark:text-zinc-400 py-8">
-              Aucun retrait en attente.
-            </p>
+            <PanelCard className="py-12 px-6 text-center border border-dash-border-subtle/50">
+              <p className="text-dash-text font-medium mb-1">{copy.emptyPending}</p>
+              <p className="text-sm text-dash-text-muted">{copy.subtitle}</p>
+            </PanelCard>
           ) : (
-            <ul className="space-y-3">
+            <ul className="space-y-1">
               {pendingList.map((w) => (
-                <li
-                  key={w.id}
-                  className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 flex flex-wrap items-center justify-between gap-4"
-                >
-                  <div className="flex flex-wrap items-center gap-4">
-                    <span className="font-mono text-sm text-zinc-500 dark:text-zinc-400">
-                      {truncateUserId(w.user_id)}
+                <li key={w.id}>
+                  <div className={`${dash.card} ${dash.cardHover} grid grid-cols-1 sm:grid-cols-[1fr_auto_auto_auto] gap-3 sm:gap-4 items-center p-4`}>
+                    <div className="min-w-0">
+                      <p className="font-mono text-sm text-dash-text-muted">{truncateUserId(w.user_id)}</p>
+                      <p className="text-xs text-dash-text-muted mt-0.5">{formatDate(w.created_at)}</p>
+                    </div>
+                    <p className="text-lg font-semibold text-dash-text tabular-nums">{formatAmount(w.amount_cents)}</p>
+                    <span className="flex items-center">
+                      <StatusBadge variant="warning">{copy.tabPending}</StatusBadge>
                     </span>
-                    <span className="font-medium text-zinc-900 dark:text-zinc-100">
-                      {(w.amount_cents / 100).toFixed(2)} €
-                    </span>
-                    <span className="text-sm text-zinc-500 dark:text-zinc-400">
-                      {formatDate(w.created_at)}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleDecide(w.id, "paid")}
-                      disabled={actionId !== null}
-                      className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
-                    >
-                      {actionId === w.id ? "…" : "Payer"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDecide(w.id, "rejected")}
-                      disabled={actionId !== null}
-                      className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
-                    >
-                      Refuser
-                    </button>
+                    <div className="flex items-center gap-2 justify-end" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        onClick={() => handleDecide(w.id, "paid")}
+                        disabled={actionId !== null}
+                        className={`rounded-lg ${dash.btn} bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-50 px-4 py-2 text-sm`}
+                      >
+                        {actionId === w.id ? "…" : copy.markPaid}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDecide(w.id, "rejected")}
+                        disabled={actionId !== null}
+                        className={`rounded-lg ${dash.btn} ${dash.btnDanger}`}
+                      >
+                        {copy.reject}
+                      </button>
+                    </div>
                   </div>
                 </li>
               ))}
             </ul>
           )
         ) : historyList.length === 0 ? (
-          <p className="text-zinc-500 dark:text-zinc-400 py-8">
-            Aucun retrait dans l'historique.
-          </p>
+          <PanelCard className="py-12 px-6 text-center border border-dash-border-subtle/50">
+            <p className="text-dash-text font-medium mb-1">{copy.emptyHistory}</p>
+            <p className="text-sm text-dash-text-muted">{copy.subtitle}</p>
+          </PanelCard>
         ) : (
-          <ul className="space-y-3">
+          <ul className="space-y-1">
             {historyList.map((w) => (
-              <li
-                key={w.id}
-                className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 flex flex-wrap items-center justify-between gap-4"
-              >
-                <div className="flex flex-wrap items-center gap-4">
-                  <span className="font-mono text-sm text-zinc-500 dark:text-zinc-400">
-                    {truncateUserId(w.user_id)}
-                  </span>
-                  <span className="font-medium text-zinc-900 dark:text-zinc-100">
-                    {(w.amount_cents / 100).toFixed(2)} €
-                  </span>
-                  <span
-                    className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium ${
-                      w.status === "paid"
-                        ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200"
-                        : "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200"
-                    }`}
-                  >
-                    {w.status === "paid" ? "Payé" : "Refusé"}
-                  </span>
-                  <span className="text-sm text-zinc-500 dark:text-zinc-400">
-                    {formatDate(w.created_at)}
-                    {w.decided_at ? ` → ${formatDate(w.decided_at)}` : ""}
-                  </span>
+              <li key={w.id}>
+                <div className={`${dash.card} ${dash.cardHover} grid grid-cols-1 sm:grid-cols-[1fr_auto_auto] gap-3 sm:gap-4 items-center p-4`}>
+                  <div className="min-w-0">
+                    <p className="font-mono text-sm text-dash-text-muted">{truncateUserId(w.user_id)}</p>
+                    <p className="text-xs text-dash-text-muted mt-0.5">
+                      {formatDate(w.created_at)}
+                      {w.decided_at ? ` → ${formatDate(w.decided_at)}` : ""}
+                    </p>
+                  </div>
+                  <p className="text-lg font-semibold text-dash-text tabular-nums">{formatAmount(w.amount_cents)}</p>
+                  <StatusBadge variant={w.status === "paid" ? "success" : "danger"}>
+                    {w.status === "paid" ? copy.statusPaid : copy.statusRejected}
+                  </StatusBadge>
                 </div>
               </li>
             ))}
           </ul>
         )}
-      </main>
+      </div>
     </div>
   );
 }

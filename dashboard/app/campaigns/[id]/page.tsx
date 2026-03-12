@@ -1,13 +1,18 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { getCampaignStats, getCampaignQualityStats, updateCampaignStatus, duplicateCampaign, validateCampaignPayouts, exportCampaignResponses, type ExportCampaignResponseRow } from "@/src/lib/supabaseCampaigns";
+import { getCampaignStats, getCampaignQualityStats, updateCampaignStatus, duplicateCampaign, validateCampaignPayouts, exportCampaignResponses, resetTestCampaign, deleteCampaign, deleteCampaignGeneric, type ExportCampaignResponseRow } from "@/src/lib/supabaseCampaigns";
 import { getCampaignTimeToQuota, formatTimeToQuota } from "@/src/lib/pilotKpis";
 import { buildCampaignProofPack, proofPackToMarkdown } from "@/src/lib/campaignProof";
 import { fetchCampaignQualityDeep, buildCampaignQualityInsights } from "@/src/lib/campaignQualityInsights";
 import { supabase, getOrgMembership } from "@/src/lib/supabase";
+import { testSwipe as testCopy, campaignDelete as deleteCopy } from "@/src/lib/uiCopy";
+import { dash } from "@/src/lib/dashboardTheme";
+import { PanelCard } from "@/src/components/ui/PanelCard";
+import { StatusBadge } from "@/src/components/ui/StatusBadge";
+import { CampaignCreativePreview } from "@/src/components/campaign/CampaignCreativePreview";
 
 type Stats = Awaited<ReturnType<typeof getCampaignStats>>;
 
@@ -39,16 +44,38 @@ export default function CampaignDetailPage() {
   const [duplicateError, setDuplicateError] = useState<"insufficient_org_credit" | "failed" | null>(null);
   const [publishError, setPublishError] = useState(false);
 
-  const loadStats = () => {
+  const loadStats = useCallback(() => {
     setLoading(true);
     getCampaignStats(id).then(setStats).finally(() => setLoading(false));
     getCampaignQualityStats(id).then(setQualityStats);
     fetchCampaignQualityDeep(id).then(setQualityDeep);
     getCampaignTimeToQuota(id).then(setTimeToQuota);
-  };
+  }, [id]);
 
   useEffect(() => {
-    loadStats();
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) setLoading(true);
+    });
+    getCampaignStats(id)
+      .then((data) => {
+        if (!cancelled) setStats(data);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    getCampaignQualityStats(id).then((data) => {
+      if (!cancelled) setQualityStats(data);
+    });
+    fetchCampaignQualityDeep(id).then((data) => {
+      if (!cancelled) setQualityDeep(data);
+    });
+    getCampaignTimeToQuota(id).then((data) => {
+      if (!cancelled) setTimeToQuota(data);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
 
   useEffect(() => {
@@ -201,17 +228,17 @@ export default function CampaignDetailPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 flex items-center justify-center">
-        <p className="text-zinc-500">Chargement…</p>
+      <div className={`${dash.page} flex items-center justify-center`}>
+        <p className="text-dash-text-muted">Chargement…</p>
       </div>
     );
   }
   if (!stats) {
     return (
-      <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 flex items-center justify-center">
+      <div className={`${dash.page} flex items-center justify-center`}>
         <div className="text-center">
-          <p className="text-zinc-600 dark:text-zinc-400">Campagne introuvable.</p>
-          <Link href="/" className="mt-4 inline-block text-zinc-900 dark:text-zinc-100 underline">
+          <p className="text-dash-text-secondary">Campagne introuvable.</p>
+          <Link href="/" className={`mt-4 inline-block ${dash.link} text-dash-text`}>
             Retour à l’accueil
           </Link>
         </div>
@@ -229,7 +256,6 @@ export default function CampaignDetailPage() {
     verbatims,
     pendingCount = 0,
     availableCount = 0,
-    source = "mock",
     costTotalCents,
   } = stats;
 
@@ -281,354 +307,214 @@ export default function CampaignDetailPage() {
       : null;
 
   return (
-    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
-      <header className="border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
-        <div className="mx-auto max-w-4xl px-6 py-4 flex items-center gap-4">
-          <Link
-            href="/"
-            className="text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
-          >
-            ← Retour
-          </Link>
-          <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100 truncate">
-            {campaign.name}
-          </h1>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-4xl px-6 py-8 space-y-8">
-        {process.env.NODE_ENV === "development" && (
-          <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-xs text-amber-900 dark:text-amber-200 font-mono">
-            <span className="font-semibold">DEV</span> user_id: {devAuth.userId ?? "—"} | org_id: {devAuth.orgId ?? "—"} | role: {devAuth.role ?? "—"}
+    <div className={dash.page}>
+      <main className={dash.containerWide + " space-y-8"}>
+        {/* Header cockpit : retour discret, titre fort, statut + tags */}
+        <div className="flex flex-col gap-4">
+          <Link href="/" className={`text-sm ${dash.link} self-start`}>← Accueil</Link>
+          <div className="flex flex-wrap items-baseline gap-3 gap-y-1">
+            <h1 className={dash.headlineHero + " truncate pr-4"}>{campaign.name}</h1>
+            <StatusBadge variant={campaign.status === "active" ? "success" : campaign.status === "paused" ? "warning" : "neutral"}>
+              {campaign.status === "active" ? "Actif" : campaign.status === "paused" ? "En pause" : "Terminée"}
+            </StatusBadge>
+            <span className={`${dash.badge} ${dash.badgeNeutral}`}>{campaign.template}</span>
+            <span className={`${dash.badge} bg-dash-accent/15 text-dash-accent`}>Qualité {qualityBadge}</span>
+            {campaign.isTest && <StatusBadge variant="test">Test swipe</StatusBadge>}
           </div>
-        )}
+          {process.env.NODE_ENV === "development" && (
+            <div className="rounded-md bg-dash-surface-2/50 px-2.5 py-1.5 text-[10px] text-dash-text-muted/80 font-mono">
+              <span className="text-dash-text-muted/70">DEV</span> {devAuth.userId ?? "—"} · {devAuth.orgId ?? "—"} · {devAuth.role ?? "—"}
+            </div>
+          )}
+        </div>
+
+        {/* Aperçu créa : type + visuel immédiat */}
+        <PanelCard className="p-0 overflow-hidden">
+          <CampaignCreativePreview campaign={campaign} />
+        </PanelCard>
 
         {validateError && (
-          <div className="rounded-xl border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/30 p-4">
-            <p className="text-sm font-medium text-red-800 dark:text-red-200">{validateError}</p>
-          </div>
+          <PanelCard className="bg-red-950/20">
+            <p className="text-sm font-medium text-red-400">{validateError}</p>
+          </PanelCard>
         )}
-
         {exportError && (
-          <div className="rounded-xl border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/30 p-4">
-            <p className="text-sm font-medium text-red-800 dark:text-red-200">{exportError}</p>
-          </div>
+          <PanelCard className="bg-red-950/20">
+            <p className="text-sm font-medium text-red-400">{exportError}</p>
+          </PanelCard>
         )}
-
         {exportToast && (
-          <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 px-4 py-3 text-sm font-medium text-emerald-800 dark:text-emerald-200">
-            {exportToast === "csv" ? "Export CSV généré." : "Export JSON généré."}
-          </div>
+          <PanelCard className="bg-emerald-950/20">
+            <p className="text-sm font-medium text-emerald-400">{exportToast === "csv" ? "Export CSV généré." : "Export JSON généré."}</p>
+          </PanelCard>
         )}
         {proofCopyToast && (
-          <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 px-4 py-3 text-sm font-medium text-emerald-800 dark:text-emerald-200">
-            Résumé preuve copié dans le presse-papiers.
-          </div>
+          <PanelCard className="bg-emerald-950/20">
+            <p className="text-sm font-medium text-emerald-400">Résumé preuve copié.</p>
+          </PanelCard>
         )}
 
+        {/* Zone actions : une primaire, secondaires regroupées */}
         <div className="flex flex-wrap items-center gap-3">
-          <span
-            className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
-              campaign.status === "active"
-                ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
-                : campaign.status === "paused"
-                  ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
-                  : "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
-            }`}
-          >
-            {campaign.status === "active" ? "Actif" : campaign.status === "paused" ? "En pause" : "Terminée"}
-          </span>
-          <span className="rounded-full bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-300 px-2.5 py-0.5 text-xs font-medium">
-            {campaign.template}
-          </span>
-          <span className="rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300 px-2.5 py-0.5 text-xs font-medium">
-            Qualité {qualityBadge}
-          </span>
-        </div>
-
-        <div className="flex flex-wrap gap-2">
           {campaign.status === "active" && (
-            <button
-              type="button"
-              onClick={() => handleStatus("paused")}
-              disabled={actionLoading}
-              className="rounded-lg border border-amber-500 text-amber-700 dark:text-amber-400 px-4 py-2 text-sm font-medium hover:bg-amber-50 dark:hover:bg-amber-900/20 disabled:opacity-50"
-            >
-              Pause
-            </button>
+            <button type="button" onClick={() => handleStatus("paused")} disabled={actionLoading} className={`${dash.btn} ${dash.btnWarning}`}>Pause</button>
           )}
           {campaign.status === "paused" && (
             <>
-              <button
-                type="button"
-                onClick={() => handleStatus("active")}
-                disabled={actionLoading}
-                className="rounded-lg bg-emerald-600 text-white px-4 py-2 text-sm font-medium hover:bg-emerald-700 disabled:opacity-50"
-              >
-                Publier
-              </button>
-              {publishError && (
-                <p className="text-sm text-red-600 dark:text-red-400">
-                  Crédit insuffisant.{" "}
-                  <Link href="/" className="underline hover:no-underline">
-                    Recharger (DEV)
-                  </Link>
-                </p>
-              )}
-              <button
-                type="button"
-                onClick={() => handleStatus("completed")}
-                disabled={actionLoading}
-                className="rounded-lg border border-zinc-400 text-zinc-700 dark:text-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50"
-              >
-                Terminer
-              </button>
+              <button type="button" onClick={() => handleStatus("active")} disabled={actionLoading} className={`${dash.btn} ${dash.btnPrimary} px-5 py-2.5`}>Publier</button>
+              {publishError && <p className="text-sm text-dash-danger">Crédit insuffisant. <Link href="/" className={dash.link}>Recharger</Link></p>}
+              <button type="button" onClick={() => handleStatus("completed")} disabled={actionLoading} className={`${dash.btn} ${dash.btnSecondary}`}>Terminer</button>
             </>
           )}
+          {campaign.status === "completed" && (
+            <button type="button" onClick={handleDuplicate} disabled={actionLoading} className={`${dash.btn} ${dash.btnPrimary} px-5 py-2.5`} title="Copie en brouillon">Créer une V2</button>
+          )}
           {campaign.status !== "completed" && (
-            <button
-              type="button"
-              onClick={handleValidatePayouts}
-              disabled={actionLoading}
-              className="rounded-lg bg-violet-600 text-white px-4 py-2 text-sm font-medium hover:bg-violet-700 disabled:opacity-50"
-            >
-              Valider paiements
-            </button>
+            <>
+              <button type="button" onClick={handleValidatePayouts} disabled={actionLoading} className={`${dash.btn} ${dash.btnGhost}`}>Valider paiements</button>
+              <button type="button" onClick={handleDuplicate} disabled={actionLoading} className={`${dash.btn} ${dash.btnGhost}`} title="Copie en brouillon">V2</button>
+              {campaign.templateKey && (
+                <button type="button" onClick={handleDuplicateVariant} disabled={actionLoading} className={`${dash.btn} ${dash.btnGhost}`}>Variante A/B</button>
+              )}
+            </>
           )}
-          <button
-            type="button"
-            onClick={handleDuplicate}
-            disabled={actionLoading}
-            className="rounded-lg border border-zinc-300 dark:border-zinc-600 text-zinc-700 dark:text-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-50"
-            title="Crée une copie en brouillon (même question, quota, récompense). Vous pourrez modifier puis publier."
-          >
-            Créer une V2
-          </button>
-          {campaign.templateKey && (
-            <button
-              type="button"
-              onClick={handleDuplicateVariant}
-              disabled={actionLoading}
-              className="rounded-lg border border-zinc-300 dark:border-zinc-600 text-zinc-700 dark:text-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-50"
-              title="Dupliquer avec une question variante pour test A/B"
-            >
-              Créer variante A/B
-            </button>
+          {duplicateError === "insufficient_org_credit" && <p className="text-sm text-dash-danger">Crédit insuffisant. <Link href="/" className={dash.link}>Recharger</Link></p>}
+          {duplicateError === "failed" && <p className="text-sm text-dash-danger">Duplication impossible.</p>}
+          {campaign.isTest && (
+            <>
+              <button type="button" onClick={async () => { setActionLoading(true); const { error } = await resetTestCampaign(id); if (error) alert(testCopy.errorReset); else loadStats(); setActionLoading(false); }} disabled={actionLoading} className={`${dash.btn} ${dash.btnWarning}`}>{testCopy.ctaReset}</button>
+              <button type="button" onClick={async () => { if (!window.confirm(testCopy.confirmDelete)) return; setActionLoading(true); const { error } = await deleteCampaign(id); setActionLoading(false); if (error) alert(testCopy.errorDelete); else router.push("/"); }} disabled={actionLoading} className={`${dash.btn} ${dash.btnDanger}`}>{testCopy.ctaDelete}</button>
+            </>
           )}
-          {duplicateError === "insufficient_org_credit" && (
-            <p className="text-sm text-red-600 dark:text-red-400">
-              Crédit insuffisant.{" "}
-              <Link href="/" className="underline hover:no-underline">
-                Recharger (DEV)
-              </Link>
-            </p>
+          {!campaign.isTest && (
+            <button type="button" onClick={async () => { if (!window.confirm(deleteCopy.confirmGeneric)) return; setActionLoading(true); const result = await deleteCampaignGeneric(id); setActionLoading(false); if ("error" in result) { alert(deleteCopy.errorGeneric + (result.error ? ` ${result.error}` : "")); return; } if (result.result === "delete_blocked" || result.result === "not_found") { alert(result.message ?? deleteCopy.errorGeneric); return; } alert(result.result === "deleted_hard" ? deleteCopy.resultDeletedHard : deleteCopy.resultDeletedSoft); router.push("/"); }} disabled={actionLoading} className={`${dash.btn} ${dash.btnDanger} ml-auto`}>Supprimer</button>
           )}
-          {duplicateError === "failed" && (
-            <p className="text-sm text-red-600 dark:text-red-400">
-              Duplication impossible.
-            </p>
-          )}
-          <button
-            type="button"
-            onClick={handleExportCsv}
-            disabled={exportLoading}
-            className="rounded-lg border border-zinc-300 dark:border-zinc-600 text-zinc-700 dark:text-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-50"
-          >
-            Exporter CSV
-          </button>
-          <button
-            type="button"
-            onClick={handleExportJson}
-            disabled={exportLoading}
-            className="rounded-lg border border-zinc-300 dark:border-zinc-600 text-zinc-700 dark:text-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-50"
-          >
-            Exporter JSON
-          </button>
+          <span className="hidden sm:inline flex-1" />
+          <button type="button" onClick={handleExportCsv} disabled={exportLoading} className={`${dash.btn} ${dash.btnGhost} text-sm`}>CSV</button>
+          <button type="button" onClick={handleExportJson} disabled={exportLoading} className={`${dash.btn} ${dash.btnGhost} text-sm`}>JSON</button>
         </div>
 
         {proofPack && (
-          <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
+          <PanelCard>
             <div className="flex items-center gap-2 mb-3">
-              <h3 className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                Résumé preuve
-              </h3>
+              <h3 className={dash.sectionTitle}>Résumé preuve</h3>
               {proofPack.goodProofCandidate && (
-                <span className="rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300 px-2 py-0.5 text-xs font-medium">
-                  Bonne preuve potentielle
-                </span>
+                <span className={`${dash.badge} ${dash.badgeSuccess}`}>Bonne preuve potentielle</span>
               )}
             </div>
-            <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-2">
-              {proofPack.summaryShort}
-            </p>
-            <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100 mb-3">
-              Chiffre fort : {proofPack.headlineNumber}
-            </p>
-            <button
-              type="button"
-              onClick={handleCopyProof}
-              className="rounded-lg border border-zinc-300 dark:border-zinc-600 text-zinc-700 dark:text-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50 dark:hover:bg-zinc-800"
-            >
+            <p className="text-sm text-dash-text-secondary mb-2">{proofPack.summaryShort}</p>
+            <p className="text-sm font-medium text-dash-text mb-3">Chiffre fort : {proofPack.headlineNumber}</p>
+            <button type="button" onClick={handleCopyProof} className={`${dash.btn} ${dash.btnSecondary}`}>
               Copier le résumé (Markdown)
             </button>
-          </div>
+          </PanelCard>
         )}
 
         {campaign.status === "completed" && (
-          <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
-            <h3 className="text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">
-              Et ensuite ?
-            </h3>
-            <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-3">
+          <PanelCard>
+            <h3 className={dash.sectionTitle + " mb-2"}>Et ensuite ?</h3>
+            <p className="text-sm text-dash-text-secondary mb-3">
               Relancez un test à partir de cette campagne : créez une V2 en brouillon, ajustez si besoin puis publiez.
             </p>
-            <button
-              type="button"
-              onClick={handleDuplicate}
-              disabled={actionLoading}
-              className="rounded-lg bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 px-4 py-2 text-sm font-medium hover:opacity-90 disabled:opacity-50"
-            >
+            <button type="button" onClick={handleDuplicate} disabled={actionLoading} className={`${dash.btn} ${dash.btnPrimary}`}>
               Créer une V2
             </button>
-          </div>
+          </PanelCard>
         )}
 
         {validateResult && (
-          <div className="rounded-xl border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-950/30 p-4">
-            <p className="text-sm font-medium text-violet-800 dark:text-violet-200">
+          <PanelCard className="bg-dash-accent/10">
+            <p className="text-sm font-medium text-dash-accent">
               Paiements validés: {validateResult.validated_responses} réponse(s), {validateResult.users} utilisateur(s), {(validateResult.total_cents / 100).toFixed(2)} €
             </p>
-          </div>
+          </PanelCard>
         )}
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
-            <p className="text-sm text-zinc-500 dark:text-zinc-400">Réponses</p>
-            <p className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
-              {responsesCount} / {quota}
-            </p>
+        {/* Métriques pilotage : bloc central */}
+        <PanelCard className="p-6">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+            <div>
+              <p className={dash.metricLabel}>Réponses</p>
+              <p className={dash.metricValue}>{responsesCount} / {quota}</p>
+            </div>
+            <div>
+              <p className={dash.metricLabel}>Paiements</p>
+              <p className="text-base font-semibold text-dash-text"><span className="text-amber-400">{pendingCount} pending</span> · <span className="text-emerald-400">{availableCount} dispo.</span></p>
+            </div>
+            <div>
+              <p className={dash.metricLabel}>Trust moyen</p>
+              <p className={dash.metricValue}>{trustAvg}</p>
+            </div>
+            <div>
+              <p className={dash.metricLabel}>Récompense · Total</p>
+              <p className={dash.metricValue}>{campaign.rewardUser} € · {campaign.total} €</p>
+            </div>
           </div>
-          <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
-            <p className="text-sm text-zinc-500 dark:text-zinc-400">Paiements</p>
-            <p className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
-              <span className="text-amber-600 dark:text-amber-400">{pendingCount} pending</span>
-              {" · "}
-              <span className="text-emerald-600 dark:text-emerald-400">{availableCount} dispo.</span>
-            </p>
-          </div>
-          <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
-            <p className="text-sm text-zinc-500 dark:text-zinc-400">Trust moyen</p>
-            <p className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
-              {trustAvg}
-            </p>
-          </div>
-          <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
-            <p className="text-sm text-zinc-500 dark:text-zinc-400">Récompense / réponse</p>
-            <p className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
-              {campaign.rewardUser} €
-            </p>
-          </div>
-          <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
-            <p className="text-sm text-zinc-500 dark:text-zinc-400">
-              Total{source === "mock" ? " (mock)" : ""}
-            </p>
-            <p className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
-              {campaign.total} €
-            </p>
-          </div>
-        </div>
+        </PanelCard>
 
         {(timeToQuota != null || (costTotalCents != null && responsesCount > 0)) && (
-          <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
-            <h3 className="text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-3">
-              KPI pilot
-            </h3>
+          <PanelCard>
+            <h3 className={dash.sectionTitle + " mb-3"}>KPI pilot</h3>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-sm">
               {timeToQuota?.quota_reached && timeToQuota.time_to_quota_seconds != null && (
                 <div>
-                  <p className="text-zinc-500 dark:text-zinc-400">Temps pour quota</p>
-                  <p className="font-medium text-zinc-900 dark:text-zinc-100">
-                    {formatTimeToQuota(timeToQuota.time_to_quota_seconds)}
-                  </p>
+                  <p className={dash.metricLabel}>Temps pour quota</p>
+                  <p className="text-base font-semibold text-dash-text tabular-nums">{formatTimeToQuota(timeToQuota.time_to_quota_seconds)}</p>
                 </div>
               )}
               {timeToQuota && !timeToQuota.quota_reached && (
                 <div>
-                  <p className="text-zinc-500 dark:text-zinc-400">Quota</p>
-                  <p className="font-medium text-zinc-900 dark:text-zinc-100">
-                    En cours ({responsesCount} / {quota})
-                  </p>
+                  <p className={dash.metricLabel}>Quota</p>
+                  <p className="font-medium text-dash-text">En cours ({responsesCount} / {quota})</p>
                 </div>
               )}
               {campaign.createdAt && (
                 <div>
-                  <p className="text-zinc-500 dark:text-zinc-400">Lancée le</p>
-                  <p className="font-medium text-zinc-900 dark:text-zinc-100">
-                    {new Date(campaign.createdAt).toLocaleDateString()}
-                  </p>
+                  <p className={dash.metricLabel}>Lancée le</p>
+                  <p className="font-medium text-dash-text">{new Date(campaign.createdAt).toLocaleDateString()}</p>
                 </div>
               )}
               {costTotalCents != null && responsesCount > 0 && (
                 <div>
-                  <p className="text-zinc-500 dark:text-zinc-400">Coût réel / réponse</p>
-                  <p className="font-medium text-zinc-900 dark:text-zinc-100">
-                    {((costTotalCents / 100) / responsesCount).toFixed(2)} €
-                  </p>
+                  <p className={dash.metricLabel}>Coût réel / réponse</p>
+                  <p className="font-medium text-dash-text">{((costTotalCents / 100) / responsesCount).toFixed(2)} €</p>
                 </div>
               )}
             </div>
-          </div>
+          </PanelCard>
         )}
 
         {(qualityStats || qualityInsights) && (
-          <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
-            <h3 className="text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-3">
-              Qualité campagne
-            </h3>
+          <PanelCard>
+            <h3 className={dash.sectionTitle + " mb-3"}>Qualité campagne</h3>
             <div className="space-y-3">
               {qualityInsights && (
                 <div className="flex items-center gap-2">
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                      qualityInsights.qualitySignal === "bon"
-                        ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
-                        : qualityInsights.qualitySignal === "faible"
-                          ? "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300"
-                          : "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
-                    }`}
+                  <StatusBadge
+                    variant={qualityInsights.qualitySignal === "bon" ? "success" : qualityInsights.qualitySignal === "faible" ? "neutral" : "warning"}
                   >
-                    {qualityInsights.qualitySignal === "bon"
-                      ? "Bon"
-                      : qualityInsights.qualitySignal === "faible"
-                        ? "Faible"
-                        : "À surveiller"}
-                  </span>
+                    {qualityInsights.qualitySignal === "bon" ? "Bon" : qualityInsights.qualitySignal === "faible" ? "Faible" : "À surveiller"}
+                  </StatusBadge>
                 </div>
               )}
               {qualityStats && (
-                <ul className="space-y-1 text-sm text-zinc-600 dark:text-zinc-400">
+                <ul className="space-y-1 text-sm text-dash-text-secondary">
                   <li>Réponses valides : {qualityStats.pct_valid} %</li>
                   <li>Trop rapide : {qualityStats.pct_too_fast} %</li>
                   <li>Vides : {qualityStats.pct_empty} %</li>
                 </ul>
               )}
               {qualityInsights?.meanDurationSec != null && (
-                <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                  Temps moyen de réponse : {qualityInsights.meanDurationSec} s
-                </p>
+                <p className="text-sm text-dash-text-secondary">Temps moyen de réponse : {qualityInsights.meanDurationSec} s</p>
               )}
               {qualityInsights && qualityInsights.flagsCount > 0 && (
-                <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                  Réponses flaggées : {qualityInsights.flagsCount} ({Math.round(qualityInsights.flaggedRatio * 100)} %)
-                </p>
+                <p className="text-sm text-dash-text-secondary">Réponses flaggées : {qualityInsights.flagsCount} ({Math.round(qualityInsights.flaggedRatio * 100)} %)</p>
               )}
-              <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                Trust moyen répondants : {trustAvg}
-              </p>
+              <p className="text-sm text-dash-text-secondary">Trust moyen répondants : {trustAvg}</p>
               {qualityInsights && qualityInsights.topChoices.length > 0 && (
                 <div>
-                  <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1">Top choix</p>
-                  <ul className="space-y-0.5 text-sm text-zinc-600 dark:text-zinc-400">
+                  <p className={dash.metricLabel + " mb-1"}>Top choix</p>
+                  <ul className="space-y-0.5 text-sm text-dash-text-secondary">
                     {qualityInsights.topChoices.slice(0, 5).map(({ choice, count, pct }) => (
                       <li key={choice} className="flex justify-between gap-2">
                         <span className="truncate">{choice}</span>
@@ -639,27 +525,23 @@ export default function CampaignDetailPage() {
                 </div>
               )}
             </div>
-          </div>
+          </PanelCard>
         )}
 
         {qualityInsights && qualityInsights.observations.length > 0 && (
-          <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
-            <h3 className="text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-3">
-              À retenir
-            </h3>
-            <ul className="space-y-2 text-sm text-zinc-600 dark:text-zinc-400">
+          <PanelCard>
+            <h3 className={dash.sectionTitle + " mb-3"}>À retenir</h3>
+            <ul className="space-y-2 text-sm text-dash-text-secondary">
               {qualityInsights.observations.slice(0, 5).map((obs, i) => (
                 <li key={i}>{obs}</li>
               ))}
             </ul>
-          </div>
+          </PanelCard>
         )}
 
         {Object.keys(distribution).length > 0 && (
-          <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
-            <h3 className="text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-3">
-              Distribution des réponses
-            </h3>
+          <PanelCard>
+            <h3 className={dash.sectionTitle + " mb-3"}>Distribution des réponses</h3>
             <ul className="space-y-2">
               {Object.entries(distribution).map(([answer, count]) => (
                 <li key={answer} className="flex justify-between items-center">
@@ -672,31 +554,24 @@ export default function CampaignDetailPage() {
                 </li>
               ))}
             </ul>
-          </div>
+          </PanelCard>
         )}
 
-        <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
-          <h3 className="text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-3">
-            Verbatims{source === "mock" ? " (mock)" : ""}
-          </h3>
+        <PanelCard>
+          <h3 className={dash.sectionTitle + " mb-3"}>Verbatims</h3>
           {verbatims.length === 0 ? (
-            <p className="text-zinc-500 dark:text-zinc-400 text-sm">Aucune réponse pour l’instant.</p>
+            <p className="text-dash-text-muted text-sm">Aucune réponse pour l’instant.</p>
           ) : (
             <ul className="space-y-3">
               {verbatims.map((r) => (
-                <li
-                  key={r.id}
-                  className="flex justify-between gap-4 py-2 border-b border-zinc-100 dark:border-zinc-800 last:border-0"
-                >
-                  <p className="text-zinc-900 dark:text-zinc-100 flex-1">{r.answer}</p>
-                  <span className="text-xs text-zinc-500 shrink-0">
-                    Trust {r.trustLevel} · {new Date(r.at).toLocaleDateString()}
-                  </span>
+                <li key={r.id} className="flex justify-between gap-4 py-2 border-b border-white/[0.06] last:border-0">
+                  <p className="text-dash-text flex-1">{r.answer}</p>
+                  <span className="text-xs text-dash-text-muted shrink-0">Trust {r.trustLevel} · {new Date(r.at).toLocaleDateString()}</span>
                 </li>
               ))}
             </ul>
           )}
-        </div>
+        </PanelCard>
       </main>
     </div>
   );
