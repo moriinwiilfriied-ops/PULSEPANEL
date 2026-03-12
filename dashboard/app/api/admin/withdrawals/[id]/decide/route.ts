@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAdminSession } from "@/src/lib/adminAuth";
 import { supabaseAdmin } from "@/src/lib/supabaseAdmin";
+import { sendWithdrawalDecidedPush } from "@/src/lib/sendExpoPush";
 
 const PAYMENT_CHANNELS = ["bank_transfer", "paypal", "other"] as const;
 
@@ -108,12 +109,30 @@ export async function POST(
     );
   }
 
-  const result = data as { error?: string; ok?: boolean } | null;
+  const result = data as {
+    error?: string;
+    ok?: boolean;
+    user_id?: string;
+    amount_cents?: number;
+    status?: string;
+  } | null;
   if (result?.error) {
     return NextResponse.json(
       { error: result.error },
       { status: 400 }
     );
+  }
+
+  if (result?.user_id != null && result?.amount_cents != null && (decision === "paid" || decision === "rejected")) {
+    sendWithdrawalDecidedPush({
+      userId: result.user_id,
+      decision,
+      amountCents: result.amount_cents,
+    }).catch((e) => {
+      if (process.env.NODE_ENV !== "test") {
+        console.warn("[decide withdrawal] push notification failed", e);
+      }
+    });
   }
 
   return NextResponse.json(result ?? { ok: true });

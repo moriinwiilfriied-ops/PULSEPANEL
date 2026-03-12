@@ -704,7 +704,7 @@ export async function getAdminCampaigns(filters: AdminCampaignsFilters = {}): Pr
     responsesByCampaign.set(r.campaign_id, list);
   });
 
-  let flagsByResponse: Map<string, number> = new Map();
+  const flagsByResponse: Map<string, number> = new Map();
   if (responseIds.length > 0) {
     const flagsRes = await supabaseAdmin.from("flags").select("response_id").in("response_id", responseIds);
     const flagsList = (flagsRes.data ?? []) as { response_id: string }[];

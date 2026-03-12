@@ -1,6 +1,6 @@
 /**
  * Campagnes & réponses depuis Supabase — Dashboard
- * Fallback mock si erreur ou vide.
+ * Pas de fallback mock : erreur ou vide → liste vide / null. Vérité produit explicite.
  */
 
 import { supabase, getCurrentOrgId } from "@/src/lib/supabase";
@@ -10,14 +10,13 @@ export function computeCostPerResponseCents(rewardCents: number): number {
   return Math.ceil(rewardCents * 1.35 + 10);
 }
 import {
-  getCampaigns as getMockCampaigns,
-  getCampaignStats as getMockCampaignStats,
-  addCampaign as addMockCampaign,
   calcPricePerResponse,
   type Campaign,
   type CampaignTemplate,
   type CampaignTargeting,
   type CampaignResponse,
+  type CreativeType,
+  type CampaignMediaAsset,
 } from "@/src/lib/mockData";
 
 export interface CampaignRow {
@@ -36,6 +35,10 @@ export interface CampaignRow {
   status: string;
   created_at: string;
   responses_count?: number;
+  is_test?: boolean;
+  deleted_at?: string | null;
+  creative_type?: string | null;
+  media_assets?: unknown; // jsonb: CampaignMediaAsset[]
 }
 
 function rowToCampaign(row: CampaignRow): Campaign {
@@ -46,6 +49,10 @@ function rowToCampaign(row: CampaignRow): Campaign {
     regions: Array.isArray(t.regions) ? (t.regions as string[]) : [],
     tags: Array.isArray(t.tags) ? (t.tags as string[]) : [],
   };
+  const mediaAssets: CampaignMediaAsset[] = Array.isArray(row.media_assets)
+    ? (row.media_assets as CampaignMediaAsset[])
+    : [];
+  const creativeType = (row.creative_type ?? "text") as CreativeType;
   return {
     id: row.id,
     name: row.name ?? "Sans titre",
@@ -62,25 +69,27 @@ function rowToCampaign(row: CampaignRow): Campaign {
     createdAt: row.created_at,
     status: (row.status as Campaign["status"]) ?? "active",
     responsesCount: row.responses_count ?? 0,
+    isTest: !!row.is_test,
+    creativeType: creativeType !== "text" ? creativeType : undefined,
+    mediaAssets: mediaAssets.length ? mediaAssets : undefined,
   };
 }
 
-/** Liste des campagnes de l'org courant (dashboard multi-tenant). */
+/** Liste des campagnes de l'org courant (dashboard multi-tenant). Pas de mock : erreur ou vide → []. */
 export async function getCampaigns(): Promise<Campaign[]> {
   const orgId = await getCurrentOrgId();
-  if (!orgId) {
-    return getMockCampaigns();
-  }
+  if (!orgId) return [];
   const { data, error } = await supabase
     .from("campaigns")
-    .select("id, org_id, name, template, template_key, template_version, question, options, targeting, quota, reward_cents, price_cents, status, created_at, responses_count")
+    .select("id, org_id, name, template, template_key, template_version, question, options, targeting, quota, reward_cents, price_cents, status, created_at, responses_count, is_test, creative_type, media_assets")
     .eq("org_id", orgId)
+    .is("deleted_at", null)
     .order("created_at", { ascending: false });
   if (error) {
     console.warn("[Supabase] getCampaigns", error.message);
-    return getMockCampaigns();
+    return [];
   }
-  if (!data?.length) return getMockCampaigns();
+  if (!data?.length) return [];
   return (data as CampaignRow[]).map(rowToCampaign);
 }
 
@@ -137,7 +146,7 @@ export async function exportCampaignResponses(
   return { data: (data ?? []) as ExportCampaignResponseRow[], error: null };
 }
 
-/** Détail + stats + réponses : Supabase avec fallback mock. */
+/** Détail + stats + réponses : Supabase uniquement. Pas de mock : erreur ou absent → null. */
 export async function getCampaignStats(campaignId: string): Promise<{
   campaign: Campaign;
   responsesCount: number;
@@ -148,19 +157,17 @@ export async function getCampaignStats(campaignId: string): Promise<{
   verbatims: CampaignResponse[];
   pendingCount?: number;
   availableCount?: number;
-  source: "supabase" | "mock";
-  /** Coût total facturé (centimes), depuis DB. undefined si mock ou non dispo. */
+  source: "supabase";
+  /** Coût total facturé (centimes), depuis DB. */
   costTotalCents?: number;
 } | null> {
   const { data: campaignRow, error: campError } = await supabase
     .from("campaigns")
-    .select("id, org_id, name, template, template_key, template_version, question, options, targeting, quota, reward_cents, price_cents, cost_total_cents, status, created_at, responses_count")
+    .select("id, org_id, name, template, template_key, template_version, question, options, targeting, quota, reward_cents, price_cents, cost_total_cents, status, created_at, responses_count, is_test, creative_type, media_assets")
     .eq("id", campaignId)
+    .is("deleted_at", null)
     .single();
-  if (campError || !campaignRow) {
-    const mock = getMockCampaignStats(campaignId);
-    return mock ? { ...mock, source: "mock" as const } : null;
-  }
+  if (campError || !campaignRow) return null;
   const campaign = rowToCampaign(campaignRow as CampaignRow);
 
   const { data: responsesRows, error: respError } = await supabase
@@ -168,10 +175,7 @@ export async function getCampaignStats(campaignId: string): Promise<{
     .select("id, campaign_id, user_id, answer, created_at, payout_status")
     .eq("campaign_id", campaignId)
     .order("created_at", { ascending: false });
-  if (respError) {
-    const mock = getMockCampaignStats(campaignId);
-    return mock ? { ...mock, source: "mock" as const } : null;
-  }
+  if (respError) return null;
   const rows = (responsesRows ?? []) as Array<{ payout_status?: string }>;
   const pendingCount = rows.filter((r) => r.payout_status === "pending").length;
   const availableCount = rows.filter((r) => r.payout_status === "available").length;
@@ -203,13 +207,14 @@ export async function getCampaignStats(campaignId: string): Promise<{
     verbatims,
     pendingCount,
     availableCount,
-    source: "supabase",
+    source: "supabase" as const,
     costTotalCents: row.cost_total_cents,
   };
 }
 
 export type CreateCampaignResult =
   | { campaign: Campaign }
+  | { error: "no_org" }
   | { error: "insufficient_org_credit" }
   | { error: "creation_failed"; message?: string };
 
@@ -233,20 +238,15 @@ export async function createCampaign(params: {
   templateVersion?: number;
   /** Si true (défaut), status=active et billing au insert. Si false, status=paused (pas de billing). */
   publishNow?: boolean;
+  /** Format créa media-first (défaut: text = comportement actuel). */
+  creativeType?: CreativeType;
+  /** Médias (URLs). Requis si creativeType image/video/comparison. */
+  mediaAssets?: CampaignMediaAsset[];
 }): Promise<CreateCampaignResult> {
   const orgId = await getCurrentOrgId();
   if (!orgId) {
     console.warn("[Supabase] createCampaign: no org");
-    const mock = addMockCampaign({
-      name: params.name,
-      template: params.template,
-      question: params.question,
-      options: params.options,
-      targeting: params.targeting,
-      quota: params.quota,
-      rewardUser: params.rewardUser,
-    });
-    return { campaign: mock };
+    return { error: "no_org" };
   }
   const reward_cents = Math.round(params.rewardUser * 100);
   const price_cents = Math.round(calcPricePerResponse(params.rewardUser) * 100);
@@ -254,7 +254,12 @@ export async function createCampaign(params: {
   if (params.targeting.responseType) {
     (targeting as Record<string, unknown>).responseType = params.targeting.responseType;
   }
-  const status = params.publishNow !== false ? "active" : "paused";
+  const creative_type = params.creativeType ?? "text";
+  const media_assets = Array.isArray(params.mediaAssets) && params.mediaAssets.length
+    ? params.mediaAssets
+    : [];
+  // Toujours insérer en paused pour éviter FK org_ledger_entries (trigger BEFORE INSERT écrit avec campaign_id avant que la ligne existe).
+  // Si publishNow : on passe en active après insert (la campagne existe alors, le ledger peut référencer son id).
   const { data, error } = await supabase
     .from("campaigns")
     .insert({
@@ -269,9 +274,11 @@ export async function createCampaign(params: {
       quota: params.quota,
       reward_cents,
       price_cents,
-      status,
+      status: "paused",
+      creative_type,
+      media_assets,
     })
-    .select("id, org_id, name, template, template_key, template_version, question, options, targeting, quota, reward_cents, price_cents, status, created_at, responses_count")
+    .select("id, org_id, name, template, template_key, template_version, question, options, targeting, quota, reward_cents, price_cents, status, created_at, responses_count, is_test, creative_type, media_assets")
     .single();
   if (error) {
     if (isInsufficientOrgCreditError(error)) {
@@ -281,7 +288,25 @@ export async function createCampaign(params: {
     console.warn("[Supabase] createCampaign", error.message);
     return { error: "creation_failed", message: msg };
   }
-  return { campaign: rowToCampaign(data as CampaignRow) };
+  const inserted = data as CampaignRow;
+  if (params.publishNow !== false) {
+    const { error: updateError } = await updateCampaignStatus(inserted.id, "active");
+    if (updateError) {
+      const msg = (updateError as { message?: string }).message ?? "";
+      if (isInsufficientOrgCreditError(updateError as { message?: string; details?: string; hint?: string })) {
+        return { error: "insufficient_org_credit" };
+      }
+      console.warn("[Supabase] createCampaign update to active", msg);
+      return { error: "creation_failed", message: msg };
+    }
+    const { data: updated } = await supabase
+      .from("campaigns")
+      .select("id, org_id, name, template, template_key, template_version, question, options, targeting, quota, reward_cents, price_cents, status, created_at, responses_count, is_test, creative_type, media_assets")
+      .eq("id", inserted.id)
+      .single();
+    if (updated) return { campaign: rowToCampaign(updated as CampaignRow) };
+  }
+  return { campaign: rowToCampaign(inserted) };
 }
 
 /** Pause / Reprendre / Terminer : met à jour le status. */
@@ -340,14 +365,16 @@ export async function duplicateCampaign(
   if (!orgId) return null;
   const { data: source, error: fetchErr } = await supabase
     .from("campaigns")
-    .select("name, template, template_key, template_version, question, options, targeting, quota, reward_cents, price_cents")
+    .select("name, template, template_key, template_version, question, options, targeting, quota, reward_cents, price_cents, creative_type, media_assets")
     .eq("id", campaignId)
     .eq("org_id", orgId)
+    .is("deleted_at", null)
     .single();
   if (fetchErr || !source) return null;
   const nameSuffix = overrides?.nameSuffix ?? " — V2";
   const name = (source.name ?? "Copie").trim() + nameSuffix;
   const question = overrides?.question ?? source.question;
+  const src = source as CampaignRow;
   const insertPayload: Record<string, unknown> = {
     org_id: orgId,
     name,
@@ -360,13 +387,15 @@ export async function duplicateCampaign(
     quota: source.quota,
     reward_cents: source.reward_cents,
     price_cents: source.price_cents,
+    creative_type: src.creative_type ?? "text",
+    media_assets: Array.isArray(src.media_assets) ? src.media_assets : [],
     status: "paused",
     source_campaign_id: campaignId,
   };
   const { data: created, error: insertErr } = await supabase
     .from("campaigns")
     .insert(insertPayload)
-    .select("id, org_id, name, template, template_key, template_version, question, options, targeting, quota, reward_cents, price_cents, status, created_at, responses_count")
+    .select("id, org_id, name, template, template_key, template_version, question, options, targeting, quota, reward_cents, price_cents, status, created_at, responses_count, is_test, creative_type, media_assets")
     .single();
   if (insertErr) {
     const msg = (insertErr as { message?: string }).message ?? "";
@@ -375,6 +404,138 @@ export async function duplicateCampaign(
   }
   if (!created) return null;
   return { campaign: rowToCampaign(created as CampaignRow) };
+}
+
+const TEST_SWIPE_NAME = "[Test swipe]";
+const TEST_SWIPE_QUOTA = 9999;
+
+/** Campagne test swipe pour l'org courant (is_test=true, pas de débit org). Une seule par org recommandée. Idempotent : si une campagne test existe déjà, la réutilise et tente de l'activer si paused. */
+export async function createTestCampaign(): Promise<
+  | { campaign: Campaign }
+  | { error: "no_org" }
+  | { error: "creation_failed"; message?: string }
+  | { error: "activation_failed"; message?: string }
+> {
+  const orgId = await getCurrentOrgId();
+  if (!orgId) return { error: "no_org" };
+
+  const existing = await getTestCampaignForOrg();
+  if (existing) {
+    if (existing.status === "active") return { campaign: existing };
+    const { error: updateError } = await updateCampaignStatus(existing.id, "active");
+    if (updateError) {
+      const msg = (updateError as { message?: string }).message ?? String(updateError);
+      return { error: "activation_failed", message: msg };
+    }
+    const { data: updated } = await supabase
+      .from("campaigns")
+      .select("id, org_id, name, template, template_key, template_version, question, options, targeting, quota, reward_cents, price_cents, status, created_at, responses_count, is_test")
+      .eq("id", existing.id)
+      .single();
+    if (updated) return { campaign: rowToCampaign(updated as CampaignRow) };
+    return { campaign: existing };
+  }
+
+  const reward_cents = 10;
+  const price_cents = Math.round(calcPricePerResponse(reward_cents / 100) * 100);
+  const { data, error } = await supabase
+    .from("campaigns")
+    .insert({
+      org_id: orgId,
+      name: TEST_SWIPE_NAME,
+      template: "A/B",
+      template_key: null,
+      template_version: 1,
+      question: "Test swipe — Quelle option préférez-vous ?",
+      options: ["Option A", "Option B"],
+      targeting: { ageMin: 18, ageMax: 65, regions: [], tags: [] },
+      quota: TEST_SWIPE_QUOTA,
+      reward_cents,
+      price_cents,
+      status: "paused",
+      is_test: true,
+    })
+    .select("id, org_id, name, template, template_key, template_version, question, options, targeting, quota, reward_cents, price_cents, status, created_at, responses_count, is_test")
+    .single();
+  if (error) {
+    const msg = (error as { message?: string; details?: string; hint?: string }).message ?? String(error);
+    console.warn("[Supabase] createTestCampaign insert", msg, error);
+    return { error: "creation_failed", message: msg };
+  }
+  const inserted = data as CampaignRow;
+  const { error: updateError } = await updateCampaignStatus(inserted.id, "active");
+  if (updateError) {
+    const msg = (updateError as { message?: string }).message ?? String(updateError);
+    console.warn("[Supabase] createTestCampaign update to active", msg, updateError);
+    return { error: "creation_failed", message: msg };
+  }
+  const { data: updated } = await supabase
+    .from("campaigns")
+    .select("id, org_id, name, template, template_key, template_version, question, options, targeting, quota, reward_cents, price_cents, status, created_at, responses_count, is_test")
+    .eq("id", inserted.id)
+    .single();
+  if (updated) return { campaign: rowToCampaign(updated as CampaignRow) };
+  return { campaign: rowToCampaign(inserted) };
+}
+
+/** Récupérer la campagne test swipe de l'org courant (s'il y en a une). */
+export async function getTestCampaignForOrg(): Promise<Campaign | null> {
+  const orgId = await getCurrentOrgId();
+  if (!orgId) return null;
+  const { data, error } = await supabase
+    .from("campaigns")
+    .select("id, org_id, name, template, template_key, template_version, question, options, targeting, quota, reward_cents, price_cents, status, created_at, responses_count, is_test")
+    .eq("org_id", orgId)
+    .eq("is_test", true)
+    .is("deleted_at", null)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error || !data) return null;
+  return rowToCampaign(data as CampaignRow);
+}
+
+/** Réinitialiser la campagne test (supprime les réponses, remet le compteur à 0). Réservé aux campagnes is_test. */
+export async function resetTestCampaign(campaignId: string): Promise<{ error: string | null }> {
+  const { data, error } = await supabase.rpc("reset_test_campaign", { _campaign_id: campaignId });
+  if (error) return { error: error.message };
+  const obj = data as { ok?: boolean; error?: string } | null;
+  if (obj && obj.ok) return { error: null };
+  return { error: (obj?.error as string) ?? "reset_failed" };
+}
+
+/** Supprimer une campagne. Autorisé uniquement pour les campagnes is_test (sécurité). */
+export async function deleteCampaign(campaignId: string): Promise<{ error: string | null }> {
+  const { data: row, error: fetchErr } = await supabase
+    .from("campaigns")
+    .select("id, is_test")
+    .eq("id", campaignId)
+    .single();
+  if (fetchErr || !row) return { error: "campaign_not_found" };
+  if (!(row as { is_test?: boolean }).is_test) return { error: "only_test_campaigns" };
+  const { error: deleteErr } = await supabase.from("campaigns").delete().eq("id", campaignId);
+  if (deleteErr) return { error: deleteErr.message };
+  return { error: null };
+}
+
+export type DeleteCampaignGenericResult =
+  | { result: "deleted_hard"; message?: string }
+  | { result: "deleted_soft"; message?: string }
+  | { result: "delete_blocked"; message?: string }
+  | { result: "not_found"; message?: string }
+  | { error: string };
+
+/** Suppression générique sûre : hard delete si 0 réponse et 0 ledger, sinon soft delete (deleted_at). Campagnes test → hard delete. */
+export async function deleteCampaignGeneric(campaignId: string): Promise<DeleteCampaignGenericResult> {
+  const { data, error } = await supabase.rpc("delete_campaign_safe", { _campaign_id: campaignId });
+  if (error) return { error: error.message };
+  const obj = data as { result?: string; message?: string } | null;
+  if (!obj || !obj.result) return { error: "Réponse inattendue." };
+  if (obj.result === "deleted_hard") return { result: "deleted_hard", message: obj.message ?? undefined };
+  if (obj.result === "deleted_soft") return { result: "deleted_soft", message: obj.message ?? undefined };
+  if (obj.result === "delete_blocked") return { result: "delete_blocked", message: obj.message ?? undefined };
+  if (obj.result === "not_found") return { result: "not_found", message: obj.message ?? undefined };
+  return { error: (obj.message as string) ?? obj.result };
 }
 
 /** Retrait en attente (dashboard). */
@@ -386,12 +547,12 @@ export interface PendingWithdrawalRow {
   created_at: string;
 }
 
-/** Liste des retraits en attente (RPC, org owner/editor). */
+/** Liste des retraits en attente (RPC, org owner/editor). Rejette en cas d'erreur. */
 export async function listPendingWithdrawals(): Promise<PendingWithdrawalRow[]> {
   const { data, error } = await supabase.rpc("list_pending_withdrawals");
   if (error) {
     if (process.env.NODE_ENV === "development") console.warn("[listPendingWithdrawals]", error.message);
-    return [];
+    throw new Error(error.message);
   }
   return (data ?? []) as PendingWithdrawalRow[];
 }
@@ -427,12 +588,12 @@ export interface RecentWithdrawalRow {
   decided_at: string | null;
 }
 
-/** Liste des retraits récents payés/refusés (RPC, org owner/editor). */
+/** Liste des retraits récents payés/refusés (RPC, org owner/editor). Rejette en cas d'erreur. */
 export async function listRecentWithdrawals(limit = 50): Promise<RecentWithdrawalRow[]> {
   const { data, error } = await supabase.rpc("list_recent_withdrawals", { _limit: limit });
   if (error) {
     if (process.env.NODE_ENV === "development") console.warn("[listRecentWithdrawals]", error.message);
-    return [];
+    throw new Error(error.message);
   }
   return (data ?? []) as RecentWithdrawalRow[];
 }

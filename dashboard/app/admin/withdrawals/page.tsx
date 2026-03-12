@@ -1,6 +1,12 @@
 import Link from "next/link";
 import { Suspense } from "react";
 import { getAdminWithdrawals, getAdminWithdrawalsKpis } from "@/src/lib/adminData";
+import { admin as copy } from "@/src/lib/uiCopy";
+import { dash } from "@/src/lib/dashboardTheme";
+import { PanelCard } from "@/src/components/ui/PanelCard";
+import { MetricCard } from "@/src/components/ui/MetricCard";
+import { DashboardSection } from "@/src/components/ui/DashboardSection";
+import { StatusBadge } from "@/src/components/ui/StatusBadge";
 import { AdminWithdrawalsFilters } from "./AdminWithdrawalsFilters";
 
 function formatDate(s: string | null) {
@@ -24,6 +30,10 @@ function truncateRef(s: string | null, max = 16) {
   return s.length > max ? s.slice(0, max) + "…" : s;
 }
 
+const tableTh = "px-3 py-2 font-medium text-dash-text-muted text-left";
+const tableTd = "px-3 py-2 text-dash-text";
+const tableTdMuted = "px-3 py-2 text-dash-text-secondary";
+
 export default async function AdminWithdrawalsPage({
   searchParams,
 }: {
@@ -35,12 +45,7 @@ export default async function AdminWithdrawalsPage({
   const searchId = typeof params.q === "string" ? params.q : undefined;
 
   const [rows, kpis] = await Promise.all([
-    getAdminWithdrawals({
-      status,
-      since,
-      searchId,
-      limit: 200,
-    }),
+    getAdminWithdrawals({ status, since, searchId, limit: 200 }),
     getAdminWithdrawalsKpis(),
   ]);
 
@@ -51,131 +56,90 @@ export default async function AdminWithdrawalsPage({
   }).toString()}`;
 
   return (
-    <div className="space-y-4">
-      <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">
-        Withdrawals
-      </h1>
+    <div className={dash.page}>
+      <div className={dash.container}>
+        <DashboardSection title={copy.withdrawalsTitle}>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
+            <MetricCard label="En attente" value={kpis.pendingCount} />
+            <MetricCard label="Montant total pending" value={`${(kpis.pendingTotalCents / 100).toFixed(2)} €`} />
+            <MetricCard label="Payés (30 j)" value={kpis.paidCountLast30} />
+          </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3">
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">En attente</p>
-          <p className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">{kpis.pendingCount}</p>
-        </div>
-        <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3">
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">Montant total pending</p>
-          <p className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">{(kpis.pendingTotalCents / 100).toFixed(2)} €</p>
-        </div>
-        <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3">
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">Payés (30 j)</p>
-          <p className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">{kpis.paidCountLast30}</p>
-        </div>
+          <Suspense fallback={<PanelCard className="h-12 animate-pulse"><span className="sr-only">Chargement…</span></PanelCard>}>
+            <AdminWithdrawalsFilters status={status} since={since} q={searchId} />
+          </Suspense>
+
+          <div className="flex items-center gap-4 flex-wrap mt-4 mb-4">
+            <p className="text-xs text-dash-text-muted">
+              Traitement avec traçabilité : clic sur un id → détail → Rejeter / Marquer payé.{" "}
+              <Link href="/withdrawals" className={dash.link}>(vue org)</Link>
+            </p>
+            <a href={exportHref} download className={`${dash.btn} ${dash.btnSecondary}`}>
+              Export CSV
+            </a>
+          </div>
+
+          {rows.length === 0 ? (
+            <PanelCard className="py-12 px-6 text-center">
+              <p className="text-dash-text-secondary">{copy.withdrawalsEmpty}</p>
+            </PanelCard>
+          ) : (
+            <>
+              <PanelCard className="p-0 overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-dash-border-subtle">
+                        <th className={tableTh}>id</th>
+                        <th className={tableTh}>created_at</th>
+                        <th className={tableTh}>user_id</th>
+                        <th className={`${tableTh} text-right`}>amount</th>
+                        <th className={tableTh}>status</th>
+                        <th className={tableTh}>method</th>
+                        <th className={tableTh}>ref / note</th>
+                        <th className={tableTh}>decided_at</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((r) => (
+                        <tr
+                          key={r.id}
+                          className="border-b border-dash-border-subtle/50 last:border-0 hover:bg-dash-surface-2/50"
+                        >
+                          <td className={`${tableTd} font-mono text-xs`} title={r.id}>
+                            <Link href={`/admin/withdrawals/${r.id}`} className={dash.link}>
+                              {truncateId(r.id)}
+                            </Link>
+                          </td>
+                          <td className={`${tableTdMuted} whitespace-nowrap`}>{formatDate(r.created_at)}</td>
+                          <td className={`${tableTd} font-mono text-xs`} title={r.user_id}>
+                            {truncateId(r.user_id)}
+                          </td>
+                          <td className={`${tableTd} text-right`}>{(r.amount_cents / 100).toFixed(2)} €</td>
+                          <td className={tableTd}>
+                            {r.status === "pending" ? (
+                              <StatusBadge variant="warning">En attente</StatusBadge>
+                            ) : r.status === "paid" ? (
+                              <StatusBadge variant="success">Payé</StatusBadge>
+                            ) : (
+                              <StatusBadge variant="danger">Refusé</StatusBadge>
+                            )}
+                          </td>
+                          <td className={tableTd}>{r.method ?? "—"}</td>
+                          <td className={`${tableTdMuted} max-w-[140px] truncate`} title={[r.external_reference, r.admin_note].filter(Boolean).join(" / ")}>
+                            {r.external_reference ? truncateRef(r.external_reference) : r.admin_note ? truncateRef(r.admin_note) : "—"}
+                          </td>
+                          <td className={`${tableTdMuted} whitespace-nowrap`}>{formatDate(r.decided_at)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </PanelCard>
+            </>
+          )}
+        </DashboardSection>
       </div>
-
-      <Suspense fallback={<div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3 h-12 animate-pulse" />}>
-        <AdminWithdrawalsFilters status={status} since={since} q={searchId} />
-      </Suspense>
-
-      <div className="flex items-center gap-4 flex-wrap">
-        <p className="text-xs text-zinc-500 dark:text-zinc-400">
-          Traitement avec traçabilité : clic sur un id → détail → Rejeter / Marquer payé. Runbook :{" "}
-          <code className="bg-zinc-200 dark:bg-zinc-700 px-1 rounded">docs/manual-withdrawals-runbook.md</code>.{" "}
-          <Link href="/withdrawals" className="underline hover:no-underline">
-            /withdrawals
-          </Link> (org)
-        </p>
-        <a
-          href={exportHref}
-          className="rounded-lg border border-zinc-300 dark:border-zinc-600 px-3 py-1.5 text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-          download
-        >
-          Export CSV
-        </a>
-      </div>
-
-      {rows.length === 0 ? (
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">
-          Aucun retrait.
-        </p>
-      ) : (
-        <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-zinc-200 dark:border-zinc-800">
-                <th className="px-3 py-2 font-medium text-zinc-600 dark:text-zinc-400">
-                  id
-                </th>
-                <th className="px-3 py-2 font-medium text-zinc-600 dark:text-zinc-400">
-                  created_at
-                </th>
-                <th className="px-3 py-2 font-medium text-zinc-600 dark:text-zinc-400">
-                  user_id
-                </th>
-                <th className="px-3 py-2 font-medium text-zinc-600 dark:text-zinc-400 text-right">
-                  amount
-                </th>
-                <th className="px-3 py-2 font-medium text-zinc-600 dark:text-zinc-400">
-                  status
-                </th>
-                <th className="px-3 py-2 font-medium text-zinc-600 dark:text-zinc-400">
-                  method
-                </th>
-                <th className="px-3 py-2 font-medium text-zinc-600 dark:text-zinc-400">
-                  ref / note
-                </th>
-                <th className="px-3 py-2 font-medium text-zinc-600 dark:text-zinc-400">
-                  decided_at
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr
-                  key={r.id}
-                  className="border-b border-zinc-100 dark:border-zinc-800 last:border-0 hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
-                >
-                  <td className="px-3 py-2 font-mono text-xs" title={r.id}>
-                    <Link
-                      href={`/admin/withdrawals/${r.id}`}
-                      className="text-zinc-900 dark:text-zinc-100 hover:underline"
-                    >
-                      {truncateId(r.id)}
-                    </Link>
-                  </td>
-                  <td className="px-3 py-2 whitespace-nowrap">
-                    {formatDate(r.created_at)}
-                  </td>
-                  <td className="px-3 py-2 font-mono text-xs" title={r.user_id}>
-                    {truncateId(r.user_id)}
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    {(r.amount_cents / 100).toFixed(2)} €
-                  </td>
-                  <td className="px-3 py-2">
-                    <span
-                      className={
-                        r.status === "pending"
-                          ? "text-amber-600 dark:text-amber-400"
-                          : r.status === "paid"
-                            ? "text-emerald-600 dark:text-emerald-400"
-                            : "text-zinc-500"
-                      }
-                    >
-                      {r.status}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2">{r.method ?? "—"}</td>
-                  <td className="px-3 py-2 max-w-[140px] truncate text-zinc-600 dark:text-zinc-400" title={[r.external_reference, r.admin_note].filter(Boolean).join(" / ")}>
-                    {r.external_reference ? truncateRef(r.external_reference) : r.admin_note ? truncateRef(r.admin_note) : "—"}
-                  </td>
-                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400 whitespace-nowrap">
-                    {formatDate(r.decided_at)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
     </div>
   );
 }

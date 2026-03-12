@@ -4,6 +4,11 @@ import {
   getAdminWebhookStats,
   type AdminWebhookEventsFilters,
 } from "@/src/lib/adminData";
+import { admin as copy } from "@/src/lib/uiCopy";
+import { dash } from "@/src/lib/dashboardTheme";
+import { PanelCard } from "@/src/components/ui/PanelCard";
+import { MetricCard } from "@/src/components/ui/MetricCard";
+import { DashboardSection } from "@/src/components/ui/DashboardSection";
 
 function formatDate(s: string | null) {
   if (!s) return "—";
@@ -28,6 +33,13 @@ function truncateError(s: string | null, max = 60) {
 
 type SearchParams = Promise<{ status?: string; type?: string; search?: string }>;
 
+const tableTh = "px-3 py-2 font-medium text-dash-text-muted text-left";
+const tableTd = "px-3 py-2 text-dash-text";
+const tableTdMuted = "px-3 py-2 text-dash-text-secondary";
+const chipBase = "text-sm px-2 py-1 rounded-[var(--dash-radius)] border transition-colors";
+const chipInactive = "border-dash-border bg-dash-surface-2/50 text-dash-text-secondary hover:bg-dash-surface-2";
+const chipActive = "border-dash-border bg-dash-surface-2 text-dash-text";
+
 export default async function AdminWebhooksPage({
   searchParams,
 }: {
@@ -47,8 +59,7 @@ export default async function AdminWebhooksPage({
     if (next) q.set("status", next);
     if (params.type) q.set("type", params.type);
     if (params.search) q.set("search", params.search);
-    const href = q.toString() ? `/admin/webhooks?${q}` : "/admin/webhooks";
-    return href;
+    return q.toString() ? `/admin/webhooks?${q}` : "/admin/webhooks";
   }
   function linkType(t: string) {
     const next = params.type === t ? undefined : t;
@@ -65,137 +76,108 @@ export default async function AdminWebhooksPage({
   ]);
 
   return (
-    <div className="space-y-4">
-      <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">
-        Webhooks (audit)
-      </h1>
-      <p className="text-sm text-zinc-600 dark:text-zinc-400">
-        Journal des événements Stripe reçus (table <code className="bg-zinc-200 dark:bg-zinc-700 px-1 rounded">webhook_events</code>). Lien possible avec <code className="bg-zinc-200 dark:bg-zinc-700 px-1 rounded">org_topups</code> via <code className="font-mono text-xs">stripe_checkout_session_id</code>.
-      </p>
+    <div className={dash.page}>
+      <div className={dash.container}>
+        <DashboardSection title={copy.webhooksTitle} subtitle={copy.webhooksSubtitle}>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+            <MetricCard label="Événements 24h" value={stats.eventsLast24h} />
+            <MetricCard label="Erreurs 24h" value={stats.errorsLast24h} />
+            <MetricCard label="Non traités / ignorés 24h" value={stats.ignoredOrReceivedLast24h} />
+            <MetricCard label="checkout.session.completed 24h" value={stats.checkoutCompletedLast24h} />
+          </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3">
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">Événements 24h</p>
-          <p className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">{stats.eventsLast24h}</p>
-        </div>
-        <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3">
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">Erreurs 24h</p>
-          <p className="text-lg font-semibold text-red-600 dark:text-red-400">{stats.errorsLast24h}</p>
-        </div>
-        <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3">
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">Non traités / ignorés 24h</p>
-          <p className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">{stats.ignoredOrReceivedLast24h}</p>
-        </div>
-        <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3">
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">checkout.session.completed 24h</p>
-          <p className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">{stats.checkoutCompletedLast24h}</p>
-        </div>
+          <div className="flex flex-wrap gap-2 items-center mb-4">
+            <span className="text-sm text-dash-text-muted">Filtres :</span>
+            <Link href="/admin/webhooks" className={`${chipBase} ${chipInactive}`}>
+              Tous
+            </Link>
+            <span className="text-dash-text-muted">|</span>
+            {["received", "processed", "ignored", "error"].map((s) => (
+              <Link
+                key={s}
+                href={linkStatus(s)}
+                className={`${chipBase} ${params.status === s ? chipActive : chipInactive}`}
+              >
+                {s}
+              </Link>
+            ))}
+            <span className="text-dash-text-muted">|</span>
+            <Link
+              href={linkType("checkout.session.completed")}
+              className={`${chipBase} ${params.type === "checkout.session.completed" ? chipActive : chipInactive}`}
+            >
+              checkout.session.completed
+            </Link>
+            <form method="get" action="/admin/webhooks" className="inline-flex gap-1">
+              <input type="hidden" name="status" value={params.status ?? ""} />
+              <input type="hidden" name="type" value={params.type ?? ""} />
+              <input
+                name="search"
+                defaultValue={params.search}
+                placeholder="event_id / checkout_session_id"
+                className="text-sm border border-dash-border rounded-[var(--dash-radius)] px-2 py-1 bg-dash-surface-2 w-48 text-dash-text placeholder:text-dash-text-muted focus:outline-none focus:ring-2 focus:ring-dash-accent/30"
+              />
+              <button type="submit" className={`${dash.btn} ${dash.btnSecondary}`}>
+                Rechercher
+              </button>
+            </form>
+          </div>
+
+          <h2 className={dash.sectionTitle + " mb-3"}>Derniers événements</h2>
+          {events.length === 0 ? (
+            <PanelCard className="py-12 px-6 text-center">
+              <p className="text-dash-text-secondary">{copy.webhooksEmpty}</p>
+            </PanelCard>
+          ) : (
+            <PanelCard className="p-0 overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-dash-border-subtle">
+                      <th className={tableTh}>received_at</th>
+                      <th className={tableTh}>event_type</th>
+                      <th className={tableTh}>event_id</th>
+                      <th className={tableTh}>processing_status</th>
+                      <th className={tableTh}>processed_at</th>
+                      <th className={tableTh}>checkout_session_id</th>
+                      <th className={tableTh}>payment_intent_id</th>
+                      <th className={tableTh}>org_id</th>
+                      <th className={tableTh}>error</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {events.map((r) => (
+                      <tr key={r.id} className="border-b border-dash-border-subtle/50 last:border-0 hover:bg-dash-surface-2/50">
+                        <td className={`${tableTdMuted} whitespace-nowrap`}>{formatDate(r.received_at)}</td>
+                        <td className={tableTd}>{r.event_type}</td>
+                        <td className={`${tableTd} font-mono text-xs max-w-[140px] truncate`} title={r.event_id}>
+                          <Link href={`/admin/webhooks/${r.id}`} className={dash.link}>
+                            {truncateId(r.event_id)}
+                          </Link>
+                        </td>
+                        <td className={tableTd}>{r.processing_status}</td>
+                        <td className={`${tableTdMuted} whitespace-nowrap`}>{formatDate(r.processed_at)}</td>
+                        <td className={`${tableTdMuted} font-mono text-xs max-w-[140px] truncate`} title={r.stripe_checkout_session_id ?? undefined}>
+                          {truncateId(r.stripe_checkout_session_id)}
+                        </td>
+                        <td className={`${tableTdMuted} font-mono text-xs max-w-[140px] truncate`} title={r.stripe_payment_intent_id ?? undefined}>
+                          {truncateId(r.stripe_payment_intent_id)}
+                        </td>
+                        <td className={`${tableTdMuted} font-mono text-xs max-w-[100px] truncate`} title={r.org_id ?? undefined}>
+                          {truncateId(r.org_id)}
+                        </td>
+                        <td className={`${tableTd} max-w-[120px] truncate text-red-400`} title={r.processing_error ?? undefined}>
+                          {truncateError(r.processing_error)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </PanelCard>
+          )}
+        </DashboardSection>
       </div>
-
-      <div className="flex flex-wrap gap-2 items-center">
-        <span className="text-sm text-zinc-600 dark:text-zinc-400">Filtres :</span>
-        <Link
-          href="/admin/webhooks"
-          className="text-sm px-2 py-1 rounded border border-zinc-300 dark:border-zinc-600 bg-zinc-100 dark:bg-zinc-800"
-        >
-          Tous
-        </Link>
-        <span className="text-zinc-400">|</span>
-        {["received", "processed", "ignored", "error"].map((s) => (
-          <Link
-            key={s}
-            href={linkStatus(s)}
-            className={`text-sm px-2 py-1 rounded border ${
-              params.status === s
-                ? "border-zinc-600 dark:border-zinc-400 bg-zinc-200 dark:bg-zinc-700"
-                : "border-zinc-300 dark:border-zinc-600"
-            }`}
-          >
-            {s}
-          </Link>
-        ))}
-        <span className="text-zinc-400">|</span>
-        <Link
-          href={linkType("checkout.session.completed")}
-          className={`text-sm px-2 py-1 rounded border ${
-            params.type === "checkout.session.completed"
-              ? "border-zinc-600 dark:border-zinc-400 bg-zinc-200 dark:bg-zinc-700"
-              : "border-zinc-300 dark:border-zinc-600"
-          }`}
-        >
-          checkout.session.completed
-        </Link>
-        <form method="get" action="/admin/webhooks" className="inline-flex gap-1">
-          <input type="hidden" name="status" value={params.status ?? ""} />
-          <input type="hidden" name="type" value={params.type ?? ""} />
-          <input
-            name="search"
-            defaultValue={params.search}
-            placeholder="event_id / checkout_session_id"
-            className="text-sm border border-zinc-300 dark:border-zinc-600 rounded px-2 py-1 bg-white dark:bg-zinc-900 w-48"
-          />
-          <button type="submit" className="text-sm px-2 py-1 rounded border border-zinc-300 dark:border-zinc-600">
-            Rechercher
-          </button>
-        </form>
-      </div>
-
-      <h2 className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-        Derniers événements
-      </h2>
-      {events.length === 0 ? (
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">
-          Aucun événement (ou aucun ne correspond aux filtres).
-        </p>
-      ) : (
-        <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-zinc-200 dark:border-zinc-800">
-                <th className="px-3 py-2 font-medium text-zinc-600 dark:text-zinc-400">received_at</th>
-                <th className="px-3 py-2 font-medium text-zinc-600 dark:text-zinc-400">event_type</th>
-                <th className="px-3 py-2 font-medium text-zinc-600 dark:text-zinc-400">event_id</th>
-                <th className="px-3 py-2 font-medium text-zinc-600 dark:text-zinc-400">processing_status</th>
-                <th className="px-3 py-2 font-medium text-zinc-600 dark:text-zinc-400">processed_at</th>
-                <th className="px-3 py-2 font-medium text-zinc-600 dark:text-zinc-400">checkout_session_id</th>
-                <th className="px-3 py-2 font-medium text-zinc-600 dark:text-zinc-400">payment_intent_id</th>
-                <th className="px-3 py-2 font-medium text-zinc-600 dark:text-zinc-400">org_id</th>
-                <th className="px-3 py-2 font-medium text-zinc-600 dark:text-zinc-400">error</th>
-              </tr>
-            </thead>
-            <tbody>
-              {events.map((r) => (
-                <tr
-                  key={r.id}
-                  className="border-b border-zinc-100 dark:border-zinc-800 last:border-0"
-                >
-                  <td className="px-3 py-2 whitespace-nowrap">{formatDate(r.received_at)}</td>
-                  <td className="px-3 py-2">{r.event_type}</td>
-                  <td className="px-3 py-2 font-mono text-xs max-w-[140px] truncate" title={r.event_id}>
-                    <Link href={`/admin/webhooks/${r.id}`} className="hover:underline">
-                      {truncateId(r.event_id)}
-                    </Link>
-                  </td>
-                  <td className="px-3 py-2">{r.processing_status}</td>
-                  <td className="px-3 py-2 whitespace-nowrap">{formatDate(r.processed_at)}</td>
-                  <td className="px-3 py-2 font-mono text-xs max-w-[140px] truncate" title={r.stripe_checkout_session_id ?? undefined}>
-                    {truncateId(r.stripe_checkout_session_id)}
-                  </td>
-                  <td className="px-3 py-2 font-mono text-xs max-w-[140px] truncate" title={r.stripe_payment_intent_id ?? undefined}>
-                    {truncateId(r.stripe_payment_intent_id)}
-                  </td>
-                  <td className="px-3 py-2 font-mono text-xs max-w-[100px] truncate" title={r.org_id ?? undefined}>
-                    {truncateId(r.org_id)}
-                  </td>
-                  <td className="px-3 py-2 max-w-[120px] truncate text-red-600 dark:text-red-400" title={r.processing_error ?? undefined}>
-                    {truncateError(r.processing_error)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
     </div>
   );
 }

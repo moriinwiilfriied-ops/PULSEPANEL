@@ -1,26 +1,72 @@
 @import "tailwindcss";
 
+/* PulsePanel — Dashboard premium 2026 (graphite, nuancé, lisible) */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #161618;
+  --foreground: #f4f4f5;
+  /* Fond global : graphite, pas noir pur */
+  --dash-bg: #161618;
+  /* Shell / nav : premier niveau */
+  --dash-surface: #1c1c1f;
+  /* Cartes / modules : niveau lisible */
+  --dash-surface-2: #232326;
+  /* Hero / panneaux mis en avant */
+  --dash-surface-3: #2a2a2e;
+  --dash-border: #2e2e32;
+  --dash-border-subtle: #27272a;
+  --dash-text: #f4f4f5;
+  --dash-text-secondary: #b4b4bc;
+  --dash-text-muted: #8a8a94;
+  --dash-success: #22c55e;
+  --dash-success-muted: #15803d;
+  --dash-warning: #d97706;
+  --dash-warning-muted: #92400e;
+  --dash-danger: #dc2626;
+  --dash-danger-muted: #991b1b;
+  --dash-accent: #6366f1;
+  --dash-accent-muted: #4f46e5;
+  --dash-test: #b45309;
+  --dash-test-bg: rgba(180, 83, 9, 0.12);
+  --dash-radius: 0.5rem;
+  --dash-radius-lg: 0.75rem;
+  --dash-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  --dash-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.08);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-dash-bg: var(--dash-bg);
+  --color-dash-surface: var(--dash-surface);
+  --color-dash-surface-2: var(--dash-surface-2);
+  --color-dash-surface-3: var(--dash-surface-3);
+  --color-dash-border: var(--dash-border);
+  --color-dash-border-subtle: var(--dash-border-subtle);
+  --color-dash-text: var(--dash-text);
+  --color-dash-text-secondary: var(--dash-text-secondary);
+  --color-dash-text-muted: var(--dash-text-muted);
+  --color-dash-success: var(--dash-success);
+  --color-dash-warning: var(--dash-warning);
+  --color-dash-danger: var(--dash-danger);
+  --color-dash-accent: var(--dash-accent);
+  --color-dash-test: var(--dash-test);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --radius-dash: var(--dash-radius);
+  --radius-dash-lg: var(--dash-radius-lg);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--dash-bg);
+  color: var(--dash-text);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+/* Rail tooltip — apparition rapide (délai côté composant 50ms) */
+@keyframes rail-tooltip-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.rail-tooltip-in {
+  animation: rail-tooltip-in 0.1s ease-out forwards;
 }

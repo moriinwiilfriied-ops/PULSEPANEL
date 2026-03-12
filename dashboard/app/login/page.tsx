@@ -1,15 +1,17 @@
 import { Suspense } from "react";
 import { LoginForm } from "./LoginForm";
+import { dash } from "@/src/lib/dashboardTheme";
+import { PanelCard } from "@/src/components/ui/PanelCard";
 
 function LoginFallback() {
   return (
-    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 flex items-center justify-center px-4">
-      <div className="w-full max-w-sm rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-sm animate-pulse">
-        <div className="h-7 bg-zinc-200 dark:bg-zinc-700 rounded w-3/4 mb-2" />
-        <div className="h-4 bg-zinc-200 dark:bg-zinc-700 rounded w-full mb-6" />
-        <div className="h-10 bg-zinc-200 dark:bg-zinc-700 rounded w-full mb-4" />
-        <div className="h-10 bg-zinc-200 dark:bg-zinc-700 rounded w-full" />
-      </div>
+    <div className={`${dash.page} flex items-center justify-center px-4`}>
+      <PanelCard className="w-full max-w-sm animate-pulse">
+        <div className="h-7 bg-dash-surface-2 rounded w-3/4 mb-2" />
+        <div className="h-4 bg-dash-surface-2 rounded w-full mb-6" />
+        <div className="h-10 bg-dash-surface-2 rounded w-full mb-4" />
+        <div className="h-10 bg-dash-surface-2 rounded w-full" />
+      </PanelCard>
     </div>
   );
 }

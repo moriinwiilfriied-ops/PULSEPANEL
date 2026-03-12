@@ -27,7 +27,7 @@ function isDashboardPublicPath(pathname: string): boolean {
 
 /** Rafraîchit la session Supabase et applique le guard dashboard (redirect login / no-access / select-org). */
 async function updateSupabaseSessionAndGuard(request: NextRequest): Promise<NextResponse> {
-  let response = NextResponse.next({ request });
+  const response = NextResponse.next({ request });
   const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
     cookies: {
       getAll() {
@@ -110,6 +110,9 @@ export async function proxy(request: NextRequest) {
 
   return updateSupabaseSessionAndGuard(request);
 }
+
+/** Point d'entrée Next.js 16 — proxy (guard auth / no-access / select-org). */
+export default proxy;
 
 export const config = {
   matcher: [

@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { getOrgMembership, getOrgBalance, orgTopupDev } from "@/src/lib/supabase";
 import { supabase } from "@/src/lib/supabase";
+import { dash } from "@/src/lib/dashboardTheme";
 
 const QUICK_AMOUNTS_CENTS = [1000, 5000, 20000];
 
@@ -92,159 +94,139 @@ export function OrgCreditHeader() {
 
   const creditLabel =
     availableCents !== null
-      ? `Crédit: ${(availableCents / 100).toFixed(2)} €`
-      : "Crédit: —";
+      ? `${(availableCents / 100).toFixed(2)} €`
+      : "—";
 
-  return (
-    <header className="border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
-      <div className="mx-auto max-w-4xl px-6 py-4 flex items-center justify-between flex-wrap gap-3">
-        <Link
-          href="/"
-          className="text-xl font-semibold text-zinc-900 dark:text-zinc-100"
-        >
-          PulsePanel
-        </Link>
-        <div className="flex items-center gap-4">
-          {orgId && (
-            <>
-              <span className="text-sm text-zinc-600 dark:text-zinc-400">
-                {creditLabel}
-              </span>
-              {isDev && membership && (
-                <span className="text-xs text-zinc-400 dark:text-zinc-500 truncate max-w-[120px]" title={`${orgId} (${membership.role})`}>
-                  {orgId.slice(0, 8)}… {membership.role}
-                </span>
-              )}
-              <button
-                type="button"
-                onClick={() => {
-                  setTopupOpen(true);
-                  setTopupError(null);
-                }}
-                className="rounded-lg bg-emerald-600 text-white px-3 py-1.5 text-sm font-medium hover:bg-emerald-700"
-              >
-                Recharger
-              </button>
-              {isDev && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setTopupOpen(true);
-                    setTopupError(null);
-                    setTopupAmount("10");
-                  }}
-                  className="rounded-lg border border-amber-400 dark:border-amber-600 bg-amber-50 dark:bg-amber-950/40 px-3 py-1.5 text-sm font-medium text-amber-800 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/40"
-                >
-                  Recharger (DEV)
-                </button>
-              )}
-            </>
-          )}
-          <nav className="flex items-center gap-4">
-            <Link
-              href="/billing"
-              className="text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100"
+  const closeTopup = useCallback(() => {
+    setTopupOpen(false);
+    setTopupError(null);
+  }, []);
+
+  useEffect(() => {
+    if (!topupOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeTopup();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [topupOpen, closeTopup]);
+
+  const topupModal = topupOpen && typeof document !== "undefined" && (
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Recharger le compte"
+      onClick={(e) => e.target === e.currentTarget && closeTopup()}
+    >
+      <div
+        className="rounded-2xl bg-dash-surface-2 p-6 max-w-sm w-full shadow-[var(--dash-shadow)] border border-dash-border-subtle"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="text-lg font-semibold text-dash-text mb-1">
+          Recharger
+        </h3>
+        <p className="text-sm text-dash-text-secondary mb-4">
+          Montants rapides (paiement Stripe)
+        </p>
+        <div className="flex gap-2 mb-4">
+          {QUICK_AMOUNTS_CENTS.map((cents) => (
+            <button
+              key={cents}
+              type="button"
+              onClick={() => handleStripeCheckout(cents)}
+              disabled={stripeLoading !== null}
+              className="flex-1 rounded-md bg-dash-surface-3 py-2 text-sm font-medium text-dash-text hover:bg-dash-surface-2/80 disabled:opacity-50 transition-colors"
             >
-              Facturation
-            </Link>
-            <Link
-              href="/withdrawals"
-              className="text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100"
-            >
-              Retraits
-            </Link>
-            <Link
-              href="/campaigns/new"
-              className="rounded-lg bg-zinc-900 dark:bg-zinc-100 px-4 py-2 text-sm font-medium text-white dark:text-zinc-900 hover:opacity-90"
-            >
-              Créer une campagne
-            </Link>
-          </nav>
+              {stripeLoading === cents ? "…" : `${cents / 100} €`}
+            </button>
+          ))}
         </div>
-      </div>
-
-      {topupOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Recharger le compte"
-        >
-          <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-xl p-6 mx-4 max-w-sm w-full border border-zinc-200 dark:border-zinc-700">
-            <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100 mb-2">
-              Recharger
-            </h3>
-            <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-3">
-              Montants rapides (paiement Stripe)
+        {topupError && (
+          <p className="text-sm text-red-400 mb-3">{topupError}</p>
+        )}
+        {isDev && (
+          <>
+            <p className="text-[10px] text-dash-text-muted/90 pt-3 mt-3 mb-2">
+              DEV : recharge directe (sans Stripe)
             </p>
-            <div className="flex gap-2 mb-4">
-              {QUICK_AMOUNTS_CENTS.map((cents) => (
-                <button
-                  key={cents}
-                  type="button"
-                  onClick={() => handleStripeCheckout(cents)}
-                  disabled={stripeLoading !== null}
-                  className="flex-1 rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-3 py-2 text-sm font-medium text-zinc-900 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-700 disabled:opacity-50"
-                >
-                  {stripeLoading === cents ? "…" : `${cents / 100} €`}
-                </button>
-              ))}
-            </div>
-            {topupError && (
-              <p className="text-sm text-red-600 dark:text-red-400 mb-3">
-                {topupError}
-              </p>
-            )}
-            {isDev && (
-              <>
-                <p className="text-xs text-zinc-400 dark:text-zinc-500 mb-2 border-t border-zinc-200 dark:border-zinc-700 pt-3 mt-3">
-                  DEV : recharge directe (sans Stripe)
-                </p>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={topupAmount}
-                  onChange={(e) => setTopupAmount(e.target.value)}
-                  placeholder="10,00"
-                  className="w-full rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-4 py-2 text-zinc-900 dark:text-zinc-100 mb-2"
-                />
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={handleTopupDev}
-                    disabled={topupLoading}
-                    className="rounded-lg bg-amber-600 text-white px-4 py-2 text-sm font-medium hover:bg-amber-700 disabled:opacity-50"
-                  >
-                    {topupLoading ? "…" : "Recharger (DEV)"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTopupOpen(false);
-                      setTopupError(null);
-                    }}
-                    className="rounded-lg border border-zinc-300 dark:border-zinc-600 px-4 py-2 text-sm font-medium text-zinc-700 dark:text-zinc-300"
-                  >
-                    Fermer
-                  </button>
-                </div>
-              </>
-            )}
-            {!isDev && (
+            <input
+              type="text"
+              inputMode="decimal"
+              value={topupAmount}
+              onChange={(e) => setTopupAmount(e.target.value)}
+              placeholder="10,00"
+              className="w-full rounded-lg bg-dash-surface-3 border border-dash-border-subtle px-3 py-2 text-sm text-dash-text placeholder:text-dash-text-muted mb-2"
+            />
+            <div className="flex gap-2">
               <button
                 type="button"
-                onClick={() => {
-                  setTopupOpen(false);
-                  setTopupError(null);
-                }}
-                className="rounded-lg border border-zinc-300 dark:border-zinc-600 px-4 py-2 text-sm font-medium text-zinc-700 dark:text-zinc-300"
+                onClick={handleTopupDev}
+                disabled={topupLoading}
+                className="rounded-md bg-amber-500/20 text-amber-400 px-3 py-1.5 text-sm font-medium hover:bg-amber-500/30 disabled:opacity-50"
+              >
+                {topupLoading ? "…" : "Recharger (DEV)"}
+              </button>
+              <button
+                type="button"
+                onClick={closeTopup}
+                className={`rounded-md ${dash.btn} ${dash.btnSecondary}`}
               >
                 Fermer
               </button>
+            </div>
+          </>
+        )}
+        {!isDev && (
+          <button
+            type="button"
+            onClick={closeTopup}
+            className={`rounded-md ${dash.btn} ${dash.btnSecondary} w-full mt-2`}
+          >
+            Fermer
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
+  return (
+    <>
+      <header className="bg-dash-surface/95 backdrop-blur-sm border-b border-dash-border-subtle flex-shrink-0">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6 py-4 flex items-center justify-between gap-4 min-h-[56px]">
+          <Link href="/" className="md:hidden text-lg font-semibold text-dash-text tracking-tight">
+            PulsePanel
+          </Link>
+          <Link href="/" className="hidden md:inline-flex items-center text-sm font-semibold text-dash-text tracking-tight hover:text-dash-text-secondary transition-colors duration-150">
+            PulsePanel
+          </Link>
+          <div className="flex items-center gap-3 sm:gap-5 ml-auto">
+            {orgId && (
+              <>
+                <div className="flex items-center gap-2 rounded-lg bg-dash-surface-2/80 px-3 py-1.5 border border-dash-border-subtle/50">
+                  <span className="text-[10px] font-medium text-dash-text-muted uppercase tracking-wider">Crédit</span>
+                  <span className="text-sm font-semibold text-dash-text tabular-nums">{creditLabel}</span>
+                </div>
+                {isDev && membership && (
+                  <span className="hidden xl:inline text-[10px] text-dash-text-muted/70 truncate max-w-[64px]" title={`${orgId} (${membership.role})`}>{orgId.slice(0, 6)}…</span>
+                )}
+                <button type="button" onClick={() => { setTopupOpen(true); setTopupError(null); }} className={`rounded-lg ${dash.btn} ${dash.btnPrimary} px-4 py-2`}>
+                  Recharger
+                </button>
+                {isDev && (
+                  <button type="button" onClick={() => { setTopupOpen(true); setTopupError(null); setTopupAmount("10"); }} className="rounded-md px-1.5 py-0.5 text-[10px] font-normal text-dash-text-muted/80 hover:text-dash-text-muted hover:bg-dash-surface-2/50" title="Recharge directe (DEV)">DEV</button>
+                )}
+              </>
             )}
+            <nav className="md:hidden flex items-center gap-2 pl-2">
+              <Link href="/billing" className={`text-sm ${dash.link}`}>Facturation</Link>
+              <Link href="/withdrawals" className={`text-sm ${dash.link}`}>Retraits</Link>
+              <Link href="/campaigns/new" className={`rounded-lg ${dash.btn} ${dash.btnPrimary} text-sm px-3 py-1.5`}>Nouvelle campagne</Link>
+            </nav>
           </div>
         </div>
-      )}
-    </header>
+      </header>
+      {topupModal && createPortal(topupModal, document.body)}
+    </>
   );
 }

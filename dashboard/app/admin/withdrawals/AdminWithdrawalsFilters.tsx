@@ -2,6 +2,7 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback } from "react";
+import { dash } from "@/src/lib/dashboardTheme";
 
 export function AdminWithdrawalsFilters({
   status,
@@ -25,51 +26,44 @@ export function AdminWithdrawalsFilters({
     [router, searchParams]
   );
 
+  const inputClass = "rounded-[var(--dash-radius)] border border-dash-border bg-dash-surface-2 px-2 py-1 text-sm text-dash-text placeholder:text-dash-text-muted focus:outline-none focus:ring-2 focus:ring-dash-accent/30";
+
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3">
+    <div className={`flex flex-wrap items-center gap-3 ${dash.card} p-3`}>
       <label className="flex items-center gap-2 text-sm">
-        <span className="text-zinc-500 dark:text-zinc-400">Status</span>
+        <span className="text-dash-text-muted">Statut</span>
         <select
           value={status ?? ""}
           onChange={(e) => setFilter("status", e.target.value)}
-          className="rounded border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-2 py-1 text-sm"
+          className={inputClass}
         >
           <option value="">Tous</option>
-          <option value="pending">pending</option>
-          <option value="paid">paid</option>
-          <option value="rejected">rejected</option>
+          <option value="pending">En attente</option>
+          <option value="paid">Payé</option>
+          <option value="rejected">Refusé</option>
         </select>
       </label>
       <label className="flex items-center gap-2 text-sm">
-        <span className="text-zinc-500 dark:text-zinc-400">Depuis (date)</span>
+        <span className="text-dash-text-muted">Depuis (date)</span>
         <input
           type="date"
           value={since ?? ""}
           onChange={(e) => setFilter("since", e.target.value)}
-          className="rounded border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-2 py-1 text-sm"
+          className={inputClass}
         />
       </label>
-      <form
-        method="get"
-        action="/admin/withdrawals"
-        className="flex items-center gap-2"
-      >
+      <form method="get" action="/admin/withdrawals" className="flex items-center gap-2">
         {status ? <input type="hidden" name="status" value={status} /> : null}
         {since ? <input type="hidden" name="since" value={since} /> : null}
-        <label className="text-sm text-zinc-500 dark:text-zinc-400">
-          user_id
-        </label>
+        <label className="text-sm text-dash-text-muted">user_id</label>
         <input
           type="text"
           name="q"
           defaultValue={q}
           placeholder="min 4 car."
-          className="rounded border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-2 py-1 text-sm w-40"
+          className={`${inputClass} w-40`}
         />
-        <button
-          type="submit"
-          className="rounded border border-zinc-300 dark:border-zinc-600 px-2 py-1 text-sm"
-        >
+        <button type="submit" className={`${dash.btn} ${dash.btnSecondary}`}>
           OK
         </button>
       </form>

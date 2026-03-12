@@ -85,6 +85,7 @@ export async function getOrgMembership(): Promise<{
 
 /**
  * Fallback dev uniquement (DASHBOARD_ALLOW_ANON_DEV=1) : crée "PulsePanel (demo)" si aucune org.
+ * En production : no-op (ne fait rien). La garde d'accès (proxy) redirige vers /no-access si 0 org.
  */
 export async function ensureOrg(): Promise<void> {
   if (process.env.NODE_ENV !== 'development' || process.env.DASHBOARD_ALLOW_ANON_DEV !== '1') return;

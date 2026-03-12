@@ -1,6 +1,9 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getAdminSession, validateAndSetAdminCookie, isAdminEnabled } from "@/src/lib/adminAuth";
+import { admin as copy } from "@/src/lib/uiCopy";
+import { dash } from "@/src/lib/dashboardTheme";
+import { PanelCard } from "@/src/components/ui/PanelCard";
 
 async function loginAction(formData: FormData) {
   "use server";
@@ -17,55 +20,46 @@ export default async function AdminLoginPage() {
   const enabled = isAdminEnabled();
   if (!enabled) {
     return (
-      <div className="min-h-screen bg-zinc-100 dark:bg-zinc-900 flex items-center justify-center p-4">
-        <div className="rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 p-6 max-w-sm text-center">
-          <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100 mb-2">
-            Admin désactivé
-          </h1>
-          <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-4">
-            Définir <code className="bg-zinc-200 dark:bg-zinc-700 px-1 rounded">ADMIN_DASHBOARD_PASSPHRASE</code> pour activer l’accès.
+      <div className={`${dash.page} flex items-center justify-center px-4`}>
+        <PanelCard className="w-full max-w-sm">
+          <h1 className="text-xl font-semibold text-dash-text mb-3">{copy.loginDisabled}</h1>
+          <p className="text-sm text-dash-text-secondary mb-6">
+            {copy.loginDisabledHint}{" "}
+            <code className="bg-dash-surface-2 px-1 rounded text-xs">ADMIN_DASHBOARD_PASSPHRASE</code>
           </p>
-          <Link
-            href="/"
-            className="text-sm text-zinc-600 dark:text-zinc-400 hover:underline"
-          >
-            Retour au dashboard
+          <Link href="/" className={dash.link}>
+            {copy.loginBack}
           </Link>
-        </div>
+        </PanelCard>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-zinc-100 dark:bg-zinc-900 flex items-center justify-center p-4">
-      <div className="rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 p-6 max-w-sm w-full">
-        <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100 mb-4">
-          Admin PulsePanel
-        </h1>
+    <div className={`${dash.page} flex items-center justify-center px-4`}>
+      <PanelCard className="w-full max-w-sm">
+        <h1 className="text-xl font-semibold text-dash-text mb-4">{copy.loginTitle}</h1>
         <form action={loginAction} className="space-y-4">
-          <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+          <label className="block text-sm font-medium text-dash-text">
             Passphrase
           </label>
           <input
             name="passphrase"
             type="password"
             autoComplete="current-password"
-            className="w-full rounded border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-3 py-2 text-zinc-900 dark:text-zinc-100 text-sm"
+            className="w-full rounded-[var(--dash-radius)] border border-dash-border bg-dash-surface-2 px-3 py-2 text-dash-text placeholder:text-dash-text-muted focus:outline-none focus:ring-2 focus:ring-dash-accent/30 text-sm"
             placeholder="Passphrase admin"
           />
-          <button
-            type="submit"
-            className="w-full rounded bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 py-2 text-sm font-medium hover:opacity-90"
-          >
+          <button type="submit" className={`w-full ${dash.btn} ${dash.btnPrimary}`}>
             Accéder
           </button>
         </form>
-        <p className="mt-4 text-xs text-zinc-500 dark:text-zinc-400 text-center">
-          <Link href="/" className="hover:underline">
-            Retour au dashboard
+        <p className="mt-4 text-xs text-dash-text-muted text-center">
+          <Link href="/" className={dash.link}>
+            {copy.loginBack}
           </Link>
         </p>
-      </div>
+      </PanelCard>
     </div>
   );
 }

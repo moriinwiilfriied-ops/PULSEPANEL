@@ -2,6 +2,11 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { dash } from "@/src/lib/dashboardTheme";
+import { PanelCard } from "@/src/components/ui/PanelCard";
+
+const inputClass = "mt-1 block w-full rounded-[var(--dash-radius)] border border-dash-border bg-dash-surface-2 px-3 py-2 text-sm text-dash-text placeholder:text-dash-text-muted focus:outline-none focus:ring-2 focus:ring-dash-accent/30";
+const labelClass = "block text-sm font-medium text-dash-text";
 
 export function FlagDetailActions({
   flagId,
@@ -84,11 +89,9 @@ export function FlagDetailActions({
 
   return (
     <div className="space-y-4">
-      <h2 className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-        Actions
-      </h2>
+      <h2 className={dash.sectionTitle}>Actions</h2>
       {error && (
-        <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+        <p className="text-sm text-red-400">{error}</p>
       )}
 
       <div className="flex flex-wrap gap-2">
@@ -97,14 +100,14 @@ export function FlagDetailActions({
             <button
               type="button"
               onClick={() => setActiveAction("legit")}
-              className="text-sm px-3 py-1.5 rounded border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900"
+              className={`${dash.btn} ${dash.btnSecondary}`}
             >
               Marquer légitime
             </button>
             <button
               type="button"
               onClick={() => setActiveAction("watch")}
-              className="text-sm px-3 py-1.5 rounded border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900"
+              className={`${dash.btn} ${dash.btnSecondary}`}
             >
               Mettre sous surveillance
             </button>
@@ -113,7 +116,7 @@ export function FlagDetailActions({
                 <button
                   type="button"
                   onClick={() => setActiveAction("freeze")}
-                  className="text-sm px-3 py-1.5 rounded border border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-950/30"
+                  className={`${dash.btn} ${dash.btnDanger}`}
                 >
                   Geler les retraits du user
                 </button>
@@ -121,7 +124,7 @@ export function FlagDetailActions({
                   <button
                     type="button"
                     onClick={() => setActiveAction("unfreeze")}
-                    className="text-sm px-3 py-1.5 rounded border border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-950/30"
+                    className={`${dash.btn} bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/25`}
                   >
                     Dégeler les retraits
                   </button>
@@ -133,97 +136,101 @@ export function FlagDetailActions({
       </div>
 
       {activeAction && activeAction !== "unfreeze" && (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            submitReview(activeAction);
-          }}
-          className="rounded-lg border border-zinc-200 dark:border-zinc-800 p-4 space-y-3"
-        >
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            {activeAction === "legit" && "Marquer ce flag comme légitime."}
-            {activeAction === "watch" && "Mettre ce user sous surveillance."}
-            {activeAction === "freeze" && "Geler les retraits de ce user (motif obligatoire)."}
-          </p>
-          <label className="block text-sm">
-            Note admin (obligatoire)
-            <textarea
-              value={adminNote}
-              onChange={(e) => setAdminNote(e.target.value)}
-              className="mt-1 block w-full rounded border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 p-2 text-sm"
-              rows={2}
-              required
-            />
-          </label>
-          {activeAction === "freeze" && (
-            <label className="block text-sm">
-              Motif du gel (obligatoire)
-              <input
-                type="text"
-                value={freezeReason}
-                onChange={(e) => setFreezeReason(e.target.value)}
-                className="mt-1 block w-full rounded border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 p-2 text-sm"
+        <PanelCard>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              submitReview(activeAction);
+            }}
+            className="space-y-3"
+          >
+            <p className="text-sm text-dash-text-secondary">
+              {activeAction === "legit" && "Marquer ce flag comme légitime."}
+              {activeAction === "watch" && "Mettre ce user sous surveillance."}
+              {activeAction === "freeze" && "Geler les retraits de ce user (motif obligatoire)."}
+            </p>
+            <label className={labelClass}>
+              Note admin (obligatoire)
+              <textarea
+                value={adminNote}
+                onChange={(e) => setAdminNote(e.target.value)}
+                className={inputClass}
+                rows={2}
                 required
               />
             </label>
-          )}
-          <div className="flex gap-2">
-            <button
-              type="submit"
-              disabled={loading}
-              className="text-sm px-3 py-1.5 rounded border border-zinc-600 bg-zinc-200 dark:bg-zinc-700 disabled:opacity-50"
-            >
-              {loading ? "…" : "Confirmer"}
-            </button>
-            <button
-              type="button"
-              onClick={() => { setActiveAction(null); setError(null); }}
-              className="text-sm px-3 py-1.5 rounded border border-zinc-300 dark:border-zinc-600"
-            >
-              Annuler
-            </button>
-          </div>
-        </form>
+            {activeAction === "freeze" && (
+              <label className={labelClass}>
+                Motif du gel (obligatoire)
+                <input
+                  type="text"
+                  value={freezeReason}
+                  onChange={(e) => setFreezeReason(e.target.value)}
+                  className={inputClass}
+                  required
+                />
+              </label>
+            )}
+            <div className="flex gap-2">
+              <button
+                type="submit"
+                disabled={loading}
+                className={`${dash.btn} ${dash.btnSecondary}`}
+              >
+                {loading ? "…" : "Confirmer"}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setActiveAction(null); setError(null); }}
+                className={`${dash.btn} ${dash.btnGhost}`}
+              >
+                Annuler
+              </button>
+            </div>
+          </form>
+        </PanelCard>
       )}
 
       {activeAction === "unfreeze" && (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            submitUnfreeze();
-          }}
-          className="rounded-lg border border-zinc-200 dark:border-zinc-800 p-4 space-y-3"
-        >
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            Dégeler les retraits de ce user. Note admin obligatoire.
-          </p>
-          <label className="block text-sm">
-            Note admin (obligatoire)
-            <textarea
-              value={adminNote}
-              onChange={(e) => setAdminNote(e.target.value)}
-              className="mt-1 block w-full rounded border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 p-2 text-sm"
-              rows={2}
-              required
-            />
-          </label>
-          <div className="flex gap-2">
-            <button
-              type="submit"
-              disabled={loading}
-              className="text-sm px-3 py-1.5 rounded border border-emerald-600 bg-emerald-100 dark:bg-emerald-900/40 disabled:opacity-50"
-            >
-              {loading ? "…" : "Dégeler"}
-            </button>
-            <button
-              type="button"
-              onClick={() => { setActiveAction(null); setError(null); }}
-              className="text-sm px-3 py-1.5 rounded border border-zinc-300 dark:border-zinc-600"
-            >
-              Annuler
-            </button>
-          </div>
-        </form>
+        <PanelCard>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              submitUnfreeze();
+            }}
+            className="space-y-3"
+          >
+            <p className="text-sm text-dash-text-secondary">
+              Dégeler les retraits de ce user. Note admin obligatoire.
+            </p>
+            <label className={labelClass}>
+              Note admin (obligatoire)
+              <textarea
+                value={adminNote}
+                onChange={(e) => setAdminNote(e.target.value)}
+                className={inputClass}
+                rows={2}
+                required
+              />
+            </label>
+            <div className="flex gap-2">
+              <button
+                type="submit"
+                disabled={loading}
+                className={`${dash.btn} bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/25`}
+              >
+                {loading ? "…" : "Dégeler"}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setActiveAction(null); setError(null); }}
+                className={`${dash.btn} ${dash.btnGhost}`}
+              >
+                Annuler
+              </button>
+            </div>
+          </form>
+        </PanelCard>
       )}
     </div>
   );
