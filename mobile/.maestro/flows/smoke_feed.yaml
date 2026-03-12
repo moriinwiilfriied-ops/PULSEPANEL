@@ -1,0 +1,6 @@
+# Smoke: feed — écran feed avec un état cohérent (loading, empty ou liste)
+# Prérequis: onglet Feed actif.
+appId: host.exp.Exponent
+---
+- assertVisible:
+    id: "feed-screen"

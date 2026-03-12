@@ -1,0 +1,7 @@
+# Smoke: ouverture app / bootstrap
+# Prérequis: l'app est lancée (ex: npx expo start puis i/o). Si premier lancement, onboarding peut s'afficher.
+# Vérifie que l'app est à l'écran (onglet Feed visible dans la barre).
+appId: host.exp.Exponent
+---
+- assertVisible:
+    text: "Feed"

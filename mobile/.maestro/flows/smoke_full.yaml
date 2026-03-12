@@ -1,0 +1,7 @@
+# Smoke complet : bootstrap + feed + wallet (enchaînement des chemins critiques)
+# Prérequis: app lancée, onglet Feed atteignable.
+appId: host.exp.Exponent
+---
+- runFlow: smoke_bootstrap.yaml
+- runFlow: smoke_feed.yaml
+- runFlow: smoke_wallet.yaml

@@ -1,0 +1,20 @@
+# Parcours answer réel : feed → Accepter → Answer → première option → Envoyer → reward → Retour au feed
+# Prérequis : une campagne test active dans le feed (voir mobile/TESTABILITY.md)
+appId: host.exp.Exponent
+---
+- assertVisible:
+    id: "feed-screen"
+- tapOn:
+    id: "feed-accept"
+- assertVisible:
+    id: "answer-screen"
+- tapOn:
+    id: "answer-option-0"
+- tapOn:
+    id: "answer-send"
+- assertVisible:
+    id: "answer-reward"
+- tapOn:
+    id: "answer-reward-back"
+- assertVisible:
+    id: "feed-screen"

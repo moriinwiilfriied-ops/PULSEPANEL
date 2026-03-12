@@ -1,0 +1,17 @@
+# Parcours retrait réel (optionnel) : Portefeuille → saisir montant → Demander un retrait → succès
+# Prérequis : solde disponible >= 5 € (voir mobile/TESTABILITY.md). Si le CTA retrait n'est pas visible, le flow échoue.
+appId: host.exp.Exponent
+---
+- tapOn:
+    text: "Portefeuille"
+- assertVisible:
+    id: "wallet-screen"
+- assertVisible:
+    id: "wallet-withdraw-section"
+- tapOn:
+    id: "wallet-withdraw-input"
+- inputText: "5.00"
+- tapOn:
+    id: "wallet-withdraw-cta"
+- assertVisible:
+    text: "Demande enregistrée"

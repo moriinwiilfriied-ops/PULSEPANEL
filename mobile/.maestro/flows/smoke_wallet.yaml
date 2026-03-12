@@ -1,0 +1,11 @@
+# Smoke: wallet — écran accessible, contenu principal visible
+# Prérequis: app sur Feed. Ouvre l'onglet Portefeuille.
+# Avec backend: section "Mes retraits" visible. Sans backend: CTA "Continuer à répondre".
+appId: host.exp.Exponent
+---
+- tapOn:
+    text: "Portefeuille"
+- assertVisible:
+    id: "wallet-screen"
+- assertVisible:
+    text: "Disponible"
