@@ -1,13 +1,16 @@
 /**
  * Enregistrement device côté backend (user_devices).
  * Identité d’installation stable : install_id généré une fois, persisté dans SecureStore.
- * Pas de fingerprint matériel ; on envoie l’install_id à la RPC qui stocke uniquement un hash.
+ * Optionnel : envoi du token Expo Push si permission + préférences activées.
  */
 
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import { supabase } from '@/lib/supabase';
 import { secureStoreAdapter } from '@/lib/secureStoreAdapter';
+import { getNotificationPermissionStatus } from '@/lib/notificationHelpers';
+import { getPushToken } from '@/lib/notificationHelpers';
+import { getNotificationPreferences } from '@/lib/profilePreferences';
 
 const INSTALL_ID_KEY = 'install_id';
 
@@ -72,16 +75,68 @@ export async function ensureDeviceRegistered(): Promise<void> {
     const platform = getPlatformTag();
     const appVersion = getAppVersion();
 
+    let expoPushToken: string | null = null;
+    try {
+      const [permStatus, prefs] = await Promise.all([
+        getNotificationPermissionStatus(),
+        getNotificationPreferences(),
+      ]);
+      if (permStatus === 'granted' && prefs.enabled && (prefs.walletUpdates || prefs.newCampaigns)) {
+        expoPushToken = await getPushToken();
+      }
+    } catch {
+      // ignore: token optionnel
+    }
+
     const { error } = await supabase.rpc('register_user_device', {
       _install_token: installToken,
       _platform: platform,
       _app_version: appVersion,
+      _expo_push_token: expoPushToken,
     });
 
     if (error && __DEV__) {
       console.warn('[deviceRegistration] register_user_device', error.message);
     }
+
+    const prefs = await getNotificationPreferences();
+    void supabase.rpc('set_notification_preferences', {
+      _wallet_updates: prefs.walletUpdates,
+      _new_campaigns: prefs.newCampaigns,
+    }).then(() => {}, () => {});
   } catch (e) {
     if (__DEV__) console.warn('[deviceRegistration]', e);
+  }
+}
+
+/**
+ * Enregistre le token Expo Push maintenant (sans throttle). À appeler quand l’utilisateur active les notifications dans le profil.
+ */
+export async function registerPushTokenNow(): Promise<void> {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user?.id) return;
+
+    const installToken = await getOrCreateInstallId();
+    const platform = getPlatformTag();
+    const appVersion = getAppVersion();
+
+    const [permStatus, prefs] = await Promise.all([
+      getNotificationPermissionStatus(),
+      getNotificationPreferences(),
+    ]);
+    const token =
+      permStatus === 'granted' && prefs.enabled && (prefs.walletUpdates || prefs.newCampaigns)
+        ? await getPushToken()
+        : null;
+
+    await supabase.rpc('register_user_device', {
+      _install_token: installToken,
+      _platform: platform,
+      _app_version: appVersion,
+      _expo_push_token: token,
+    });
+  } catch {
+    // ignore
   }
 }

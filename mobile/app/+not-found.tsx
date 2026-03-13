@@ -1,17 +1,20 @@
 import { Link, Stack } from 'expo-router';
-import { StyleSheet } from 'react-native';
-
-import { Text, View } from '@/components/Themed';
+import { StyleSheet, View } from 'react-native';
+import { Text } from '@/components/Themed';
+import { colors, spacing } from '@/lib/uiTheme';
 
 export default function NotFoundScreen() {
   return (
     <>
-      <Stack.Screen options={{ title: 'Oops!' }} />
-      <View style={styles.container}>
-        <Text style={styles.title}>This screen doesn't exist.</Text>
-
-        <Link href="/" style={styles.link}>
-          <Text style={styles.linkText}>Go to home screen!</Text>
+      <Stack.Screen options={{ title: 'Page introuvable' }} />
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <Text style={[styles.title, { color: colors.textPrimary }]}>
+          Cette page n&apos;existe pas.
+        </Text>
+        <Link href="/(tabs)/feed" style={styles.link}>
+          <Text style={[styles.linkText, { color: colors.walletBalance }]}>
+            Retour au feed
+          </Text>
         </Link>
       </View>
     </>
@@ -23,18 +26,21 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 20,
+    padding: spacing.xl,
   },
   title: {
     fontSize: 20,
-    fontWeight: 'bold',
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: spacing.xl,
   },
   link: {
-    marginTop: 15,
-    paddingVertical: 15,
+    marginTop: spacing.md,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.xl,
   },
   linkText: {
-    fontSize: 14,
-    color: '#2e78b7',
+    fontSize: 15,
+    fontWeight: '600',
   },
 });

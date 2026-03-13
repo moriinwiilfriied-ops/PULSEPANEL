@@ -7,6 +7,19 @@ import { getAppStore } from '@/store/useAppStore';
 
 export type QuestionType = 'poll' | 'choice' | 'text';
 
+/** Type de créatif (media-first). Défaut = texte. */
+export type CreativeType = 'text' | 'image' | 'video' | 'comparison';
+
+/** URLs des médias pour le feed (primary ou A/B). */
+export interface FeedMediaUrls {
+  primary?: string;
+  comparisonA?: string;
+  comparisonB?: string;
+}
+
+/** Template campagne (dashboard / API). Optionnel pour mock. */
+export type CampaignTemplate = 'Price test' | 'Slogan' | 'A/B' | string;
+
 export interface MockQuestion {
   id: string;
   question: string;
@@ -16,6 +29,10 @@ export interface MockQuestion {
   etaSeconds: number;
   imagePlaceholder?: string;
   campaignId?: string;
+  creativeType?: CreativeType;
+  mediaUrls?: FeedMediaUrls;
+  /** Template campagne (ex. Price test, A/B) pour libellé de type de réponse cohérent feed/answer. */
+  template?: CampaignTemplate;
 }
 
 /** Item normalisé pour le feed : question lisible + badge source (SB / MOCK). */
@@ -46,6 +63,7 @@ export const mockQuestions: MockQuestion[] = [
     etaSeconds: 45,
     imagePlaceholder: 'Price test',
     campaignId: 'c1',
+    template: 'Price test',
   },
   {
     id: 'q2',
@@ -55,6 +73,7 @@ export const mockQuestions: MockQuestion[] = [
     reward: 0.15,
     etaSeconds: 30,
     campaignId: 'c2',
+    template: 'Slogan',
   },
   {
     id: 'q3',
@@ -82,6 +101,7 @@ export const mockQuestions: MockQuestion[] = [
     etaSeconds: 40,
     imagePlaceholder: 'A/B test',
     campaignId: 'c2',
+    template: 'A/B',
   },
 ];
 

@@ -1,10 +1,10 @@
 /**
- * Appels Supabase — Mobile (avec fallback mock)
+ * Appels Supabase — Mobile.
+ * Sans backend configuré : feed vide, wallet local remis à zéro au boot (pas de fausses données).
  */
 
 import { supabase } from '@/lib/supabase';
-import type { FeedQuestion, MockQuestion } from '@/lib/mockData';
-import { getAvailableQuestions } from '@/lib/mockData';
+import type { FeedQuestion } from '@/lib/mockData';
 import { getAppStore } from '@/store/useAppStore';
 
 export type FeedSource = 'supabase' | 'supabase_error' | 'mock';
@@ -67,6 +67,34 @@ export async function fetchUserTrust(): Promise<UserTrustRow | null> {
   };
 }
 
+/** Profil ciblage (âge, région, tags) depuis public.users. */
+export interface UserProfileRow {
+  age_bucket: string | null;
+  region: string | null;
+  tags: string[];
+}
+
+export async function fetchUserProfile(): Promise<UserProfileRow | null> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+  const { data, error } = await supabase
+    .from('users')
+    .select('age_bucket, region, tags')
+    .eq('id', user.id)
+    .maybeSingle();
+  if (error) {
+    if (__DEV__) console.warn('[Supabase] fetchUserProfile', error.message);
+    return null;
+  }
+  if (!data) return null;
+  const row = data as { age_bucket?: string | null; region?: string | null; tags?: string[] | null };
+  return {
+    age_bucket: row.age_bucket ?? null,
+    region: row.region ?? null,
+    tags: Array.isArray(row.tags) ? row.tags : [],
+  };
+}
+
 /** Upsert public.users au submit onboarding (id = auth.uid()). */
 export async function upsertUserOnboarding(params: {
   ageBucket: string;
@@ -103,13 +131,15 @@ export interface CampaignRow {
   status: string;
   created_at: string;
   responses_count?: number;
+  creative_type?: string | null;
+  media_assets?: { type: string; role: string; url: string }[];
 }
 
 /** Fetch campaigns actives (status=active, responses_count < quota). Expose erreur pour ne pas fallback mock silencieux. */
 export async function fetchActiveCampaigns(): Promise<{ campaigns: CampaignRow[]; error?: string }> {
   const { data, error } = await supabase
     .from('campaigns')
-    .select('id, name, template, question, options, targeting, quota, reward_cents, price_cents, status, created_at, responses_count')
+    .select('id, name, template, question, options, targeting, quota, reward_cents, price_cents, status, created_at, responses_count, creative_type, media_assets')
     .eq('status', 'active')
     .order('created_at', { ascending: false })
     .limit(50);
@@ -126,7 +156,7 @@ export async function fetchActiveCampaigns(): Promise<{ campaigns: CampaignRow[]
 export async function fetchCampaignById(id: string): Promise<CampaignRow | null> {
   const { data, error } = await supabase
     .from('campaigns')
-    .select('id, name, template, question, options, targeting, quota, reward_cents, price_cents, status, created_at')
+    .select('id, name, template, question, options, targeting, quota, reward_cents, price_cents, status, created_at, creative_type, media_assets')
     .eq('id', id)
     .single();
   if (error || !data) return null;
@@ -152,6 +182,17 @@ export function campaignToFeedQuestion(row: CampaignRow): FeedQuestion {
   const type = (row.template === 'Slogan' || row.template === 'Price test' ? 'choice' : row.template === 'A/B' ? 'poll' : 'choice') as FeedQuestion['type'];
   const questionText = (row.question ?? row.name ?? '').trim() || 'Question (à définir)';
   const opts = options.length ? options : (type === 'poll' ? ['Oui', 'Non'] : undefined);
+  const creativeType = (row.creative_type === 'image' || row.creative_type === 'video' || row.creative_type === 'comparison')
+    ? row.creative_type
+    : undefined;
+  const assets = Array.isArray(row.media_assets) ? row.media_assets : [];
+  const mediaUrls: FeedQuestion['mediaUrls'] = {};
+  for (const a of assets) {
+    if (a.role === 'primary' && a.url) mediaUrls.primary = a.url;
+    if (a.role === 'comparison_a' && a.url) mediaUrls.comparisonA = a.url;
+    if (a.role === 'comparison_b' && a.url) mediaUrls.comparisonB = a.url;
+  }
+  const hasMedia = mediaUrls.primary || mediaUrls.comparisonA || mediaUrls.comparisonB;
   return {
     id: row.id,
     question: questionText,
@@ -162,6 +203,9 @@ export function campaignToFeedQuestion(row: CampaignRow): FeedQuestion {
     reward: row.reward_cents / 100,
     etaSeconds: 45,
     campaignId: row.id,
+    creativeType: hasMedia ? creativeType : undefined,
+    mediaUrls: hasMedia ? mediaUrls : undefined,
+    template: row.template ?? undefined,
   };
 }
 
@@ -176,22 +220,15 @@ function asArray(v: unknown): string[] {
 }
 
 /**
- * Récupère le feed avec source explicite : supabase (même vide), supabase_error, ou mock si SB non configuré.
+ * Récupère le feed avec source explicite : supabase (même vide), supabase_error, ou mock (items vides) si SB non configuré.
+ * Sans backend : on ne renvoie pas de fausses campagnes ; l'UI affiche un état vide honnête.
  */
 export async function getFeedQuestionsWithSource(): Promise<FeedQuestionsResult> {
   if (!isSupabaseConfigured()) {
-    return { source: 'mock', items: getAvailableQuestions() };
+    return { source: 'mock', items: [] };
   }
 
   try {
-    const store = getAppStore();
-    const history = store.history ?? [];
-    const answeredIdsFromHistory: string[] = history.map((h) => {
-      if (h == null || typeof h !== 'object') return '';
-      const id = 'questionId' in h ? h.questionId : 'campaignId' in h ? (h as { campaignId?: string }).campaignId : null;
-      return id != null ? String(id) : '';
-    }).filter(Boolean);
-
     const [campRes, myAnsweredRaw] = await Promise.all([
       fetchActiveCampaigns(),
       fetchMyAnsweredCampaignIds(),
@@ -202,9 +239,10 @@ export async function getFeedQuestionsWithSource(): Promise<FeedQuestionsResult>
       return { source: 'supabase_error', error: campRes.error, items: [] };
     }
 
+    // Flux réel : on filtre uniquement par les réponses déjà enregistrées en base (responses).
+    // On n'utilise pas l'historique local du store pour éviter tout mélange mock/réel.
     const myAnsweredIds: string[] = asArray(myAnsweredRaw);
-    const answeredIds: string[] = [...answeredIdsFromHistory, ...myAnsweredIds];
-    const available = campRes.campaigns.filter((c) => c && !answeredIds.includes(String(c.id)));
+    const available = campRes.campaigns.filter((c) => c && !myAnsweredIds.includes(String(c.id)));
     const items = available.map(campaignToFeedQuestion);
     return { source: 'supabase', items };
   } catch (e) {
@@ -430,4 +468,16 @@ export async function fetchMyWithdrawals(): Promise<WithdrawalRow[]> {
     return [];
   }
   return (data ?? []) as WithdrawalRow[];
+}
+
+/** Synchronise les préférences notifications vers le backend (public.users). Utilisé par le sender push. */
+export async function setNotificationPreferencesBackend(prefs: {
+  walletUpdates: boolean;
+  newCampaigns: boolean;
+}): Promise<void> {
+  if (!isSupabaseConfigured()) return;
+  await supabase.rpc('set_notification_preferences', {
+    _wallet_updates: prefs.walletUpdates,
+    _new_campaigns: prefs.newCampaigns,
+  });
 }

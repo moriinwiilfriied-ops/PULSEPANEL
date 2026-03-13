@@ -4,7 +4,7 @@
  */
 
 import { router, useLocalSearchParams } from 'expo-router';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   StyleSheet,
   View,
@@ -14,26 +14,26 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Animated,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text } from '@/components/Themed';
-import { useColorScheme } from '@/components/useColorScheme';
-import Colors from '@/constants/Colors';
 import { mockQuestions, submitAnswer, type MockQuestion } from '@/lib/mockData';
-import { fetchCampaignById, submitResponseToSupabase, responseLimitErrorToMessage } from '@/lib/supabaseApi';
+import { fetchCampaignById, campaignToFeedQuestion, submitResponseToSupabase, responseLimitErrorToMessage } from '@/lib/supabaseApi';
+import { MediaStage } from '@/components/MediaStage';
+import { getResponseTypeLabel } from '@/lib/responseTypeLabels';
 import { answer as copy } from '@/lib/uiCopy';
+import { colors, spacing, radius, buttonStyles, typo } from '@/lib/uiTheme';
+
+const ANSWER_MEDIA_HEIGHT = 220;
 
 export default function AnswerScreen() {
   const insets = useSafeAreaInsets();
-  const colorScheme = useColorScheme();
-  const colors = Colors[colorScheme];
   const { questionId } = useLocalSearchParams<{ questionId: string }>();
-  const textColor = colors.text;
-  const mutedColor = colors.tabIconDefault;
   const sheetBg = colors.background;
-  const cardBg = colorScheme === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)';
-  const borderColor = colors.tabIconDefault;
-  const selectionColor = colors.tint;
+  const cardBg = colors.surface;
+  const borderColor = colors.border;
+  const selectionColor = colors.success;
   const [supabaseQuestion, setSupabaseQuestion] = useState<MockQuestion | null>(null);
   const [loading, setLoading] = useState(!!questionId && !mockQuestions.find((q) => q.id === questionId) && /^[0-9a-f-]{36}$/i.test(questionId ?? ''));
   const question = mockQuestions.find((q) => q.id === questionId) ?? supabaseQuestion;
@@ -43,6 +43,15 @@ export default function AnswerScreen() {
   const [rewardAmount, setRewardAmount] = useState(0);
   const [answerStartedAt, setAnswerStartedAt] = useState<number | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (question && step === 'form') {
+      fadeAnim.setValue(0);
+      Animated.timing(fadeAnim, { toValue: 1, duration: 220, useNativeDriver: true }).start();
+    }
+  }, [question, step, fadeAnim]);
 
   useEffect(() => {
     if (!questionId || question) return;
@@ -50,17 +59,18 @@ export default function AnswerScreen() {
     (async () => {
       const row = await fetchCampaignById(questionId);
       if (row) {
-        const options = Array.isArray(row.options) ? row.options : [];
-        const questionText = (row.question ?? row.name ?? '').trim() || 'Question (à définir)';
-        const opts = options.length ? options : ['Oui', 'Non'];
+        const feedQ = campaignToFeedQuestion(row);
         setSupabaseQuestion({
-          id: row.id,
-          question: questionText,
-          type: (row.template === 'A/B' ? 'poll' : 'choice') as MockQuestion['type'],
-          options: opts,
-          reward: row.reward_cents / 100,
-          etaSeconds: 45,
-          campaignId: row.id,
+          id: feedQ.id,
+          question: feedQ.question,
+          type: feedQ.type,
+          options: feedQ.options,
+          reward: feedQ.reward,
+          etaSeconds: feedQ.etaSeconds ?? 45,
+          campaignId: feedQ.campaignId,
+          creativeType: feedQ.creativeType,
+          mediaUrls: feedQ.mediaUrls,
+          template: feedQ.template,
         });
       }
       setLoading(false);
@@ -69,22 +79,22 @@ export default function AnswerScreen() {
 
   useEffect(() => {
     if (question && step === 'form') setAnswerStartedAt((t) => (t == null ? Date.now() : t));
-  }, [question?.id, step]);
+  }, [question, step]);
 
   if (loading) {
     return (
       <View style={[styles.container, styles.center, { backgroundColor: sheetBg }]}>
-        <ActivityIndicator size="large" color={colors.tint} />
+        <ActivityIndicator size="large" color={colors.success} />
       </View>
     );
   }
 
   if (!question) {
     return (
-      <View style={[styles.container, { backgroundColor: sheetBg }]}>
-        <Text style={{ color: textColor }}>Question introuvable.</Text>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Text style={[styles.link, { color: colors.tint }]}>Retour</Text>
+      <View style={[styles.container, { backgroundColor: sheetBg, padding: spacing.xl }]}>
+        <Text style={typo.body}>Question introuvable.</Text>
+        <TouchableOpacity onPress={() => router.back()} style={{ marginTop: spacing.lg }}>
+          <Text style={[typo.body, { color: colors.success, fontWeight: '600' }]}>Retour</Text>
         </TouchableOpacity>
       </View>
     );
@@ -102,21 +112,27 @@ export default function AnswerScreen() {
     const isSupabase = /^[0-9a-f-]{36}$/i.test(question.id);
     const durationMs = answerStartedAt != null ? Math.round(Date.now() - answerStartedAt) : undefined;
     if (isSupabase) {
+      if (submitting) return;
       setSubmitError(null);
-      const { error, reward } = await submitResponseToSupabase({
-        campaignId: question.id,
-        question: question.question,
-        answer,
-        durationMs,
-        rewardCents: Math.round(question.reward * 100),
-      });
-      if (error) {
-        const friendly = responseLimitErrorToMessage(error.message);
-        setSubmitError(friendly ?? copy.submitErrorDefault);
-        return;
+      setSubmitting(true);
+      try {
+        const { error, reward } = await submitResponseToSupabase({
+          campaignId: question.id,
+          question: question.question,
+          answer,
+          durationMs,
+          rewardCents: Math.round(question.reward * 100),
+        });
+        if (error) {
+          const friendly = responseLimitErrorToMessage(error.message);
+          setSubmitError(friendly ?? copy.submitErrorDefault);
+          return;
+        }
+        setRewardAmount(reward ?? question.reward);
+        setStep('reward');
+      } finally {
+        setSubmitting(false);
       }
-      setRewardAmount(reward ?? question.reward);
-      setStep('reward');
       return;
     }
     const entry = submitAnswer(question.id, answer);
@@ -133,13 +149,13 @@ export default function AnswerScreen() {
 
   if (step === 'reward') {
     return (
-      <View style={[styles.container, styles.rewardContainer, { paddingTop: insets.top + 48, backgroundColor: sheetBg }]}>
-        <View style={[styles.rewardCard, { backgroundColor: cardBg, borderWidth: 1, borderColor: borderColor }]}>
-          <Text style={[styles.rewardTitle, { color: textColor }]}>Réponse enregistrée</Text>
-          <Text style={styles.rewardAmount}>+{rewardAmount.toFixed(2)} €</Text>
-          <Text style={[styles.rewardSub, { color: mutedColor }]}>Crédité en attente de validation.</Text>
-          <TouchableOpacity style={[styles.rewardBtn, { backgroundColor: colors.tint }]} onPress={handleCloseReward}>
-            <Text style={styles.rewardBtnText}>OK</Text>
+      <View style={[styles.container, styles.rewardContainer, { paddingTop: insets.top + 48, backgroundColor: sheetBg }]} testID="answer-reward">
+        <View style={[styles.rewardCard, { backgroundColor: colors.surfaceElevated }]}>
+          <Text style={[typo.label, { marginBottom: spacing.sm, color: colors.success }]}>Réponse enregistrée</Text>
+          <Text style={[styles.rewardCardAmount]}>+{rewardAmount.toFixed(2)} €</Text>
+          <Text style={[typo.caption, { marginBottom: spacing.xl }]}>Crédité en attente de validation.</Text>
+          <TouchableOpacity style={[buttonStyles.primary, { minWidth: 160 }]} onPress={handleCloseReward} testID="answer-reward-back">
+            <Text style={buttonStyles.primaryText}>Retour au feed</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -147,29 +163,45 @@ export default function AnswerScreen() {
   }
 
   const optionBg = (selected: boolean) =>
-    selected ? (colorScheme === 'dark' ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.08)') : cardBg;
-  const optionBorder = (selected: boolean) => (selected ? colors.tint : borderColor);
+    selected ? colors.successMuted : cardBg;
+  const optionBorder = (selected: boolean) => (selected ? colors.success : borderColor);
 
   return (
     <KeyboardAvoidingView
       style={[styles.container, { backgroundColor: sheetBg }]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={insets.top + 60}
+      testID="answer-screen"
     >
       <ScrollView
-        contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 24 }]}
+        contentContainerStyle={[styles.scroll, styles.scrollContent, { paddingBottom: insets.bottom + spacing.xl }]}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={[styles.question, { color: textColor }]}>{question.question}</Text>
-        <Text style={[styles.typeLabel, { color: mutedColor }]}>{question.type}</Text>
+        <Animated.View style={{ opacity: fadeAnim }}>
+          {/* Header média : même créa que le feed pour continuité */}
+          {question.creativeType && question.mediaUrls && (question.creativeType === 'image' || question.creativeType === 'video' || question.creativeType === 'comparison') && (
+            <MediaStage
+              creativeType={question.creativeType}
+              mediaUrls={question.mediaUrls}
+              height={ANSWER_MEDIA_HEIGHT}
+              compact
+            />
+          )}
+          <View style={styles.questionBlock}>
+            <Text style={[typo.cardTitle, styles.questionTitle]}>{question.question}</Text>
+            <View style={styles.rewardRow}>
+              <Text style={typo.caption}>Récompense</Text>
+              <Text style={[typo.dataSuccess, styles.rewardAmount]}>+{question.reward.toFixed(2)} €</Text>
+            </View>
+          </View>
 
-        {question.type === 'text' && (
+          {question.type === 'text' && (
           <TextInput
-            style={[styles.textInput, { color: textColor, backgroundColor: cardBg, borderColor }]}
+            style={[styles.textInput, { color: colors.textPrimary, backgroundColor: cardBg, borderColor }]}
             value={textAnswer}
             onChangeText={setTextAnswer}
             placeholder="Votre réponse..."
-            placeholderTextColor={mutedColor}
+            placeholderTextColor={colors.textMuted}
             selectionColor={selectionColor}
             multiline
             numberOfLines={3}
@@ -177,109 +209,103 @@ export default function AnswerScreen() {
         )}
 
         {submitError ? (
-          <View style={[styles.errorBox, { backgroundColor: colorScheme === 'dark' ? 'rgba(200,80,80,0.2)' : 'rgba(200,80,80,0.1)', borderColor: '#c44' }]}>
+          <View style={[styles.errorBox, { backgroundColor: colors.dangerMuted, borderColor: colors.danger }]}>
             <Text style={styles.errorText}>{submitError}</Text>
           </View>
         ) : null}
         {(question.type === 'choice' || question.type === 'poll') && question.options && (
-          <View style={styles.options}>
-            {question.options.map((opt) => {
+          <>
+            <Text style={[typo.caption, styles.responseTypeLabel]}>{getResponseTypeLabel(question)}</Text>
+            <View style={styles.options}>
+            {question.options.map((opt, index) => {
               const selected = selectedOption === opt;
               return (
                 <TouchableOpacity
                   key={opt}
                   style={[
-                    styles.option,
+                    styles.optionPill,
                     { backgroundColor: optionBg(selected), borderColor: optionBorder(selected) },
                   ]}
                   onPress={() => setSelectedOption(opt)}
-                  activeOpacity={0.8}
+                  activeOpacity={0.7}
+                  testID={index === 0 ? 'answer-option-0' : index === 1 ? 'answer-option-1' : undefined}
                 >
-                  <Text style={[styles.optionText, { color: textColor }, selected && styles.optionTextSelected]}>
-                    {opt}
-                  </Text>
+                  <Text style={[typo.body, selected && styles.optionTextSelected]}>{opt}</Text>
                 </TouchableOpacity>
               );
             })}
           </View>
+          </>
         )}
 
-        <TouchableOpacity
-          style={[
-            styles.sendBtn,
-            { backgroundColor: colors.tint },
-            !canSend && styles.sendBtnDisabled,
-          ]}
-          onPress={handleSend}
-          disabled={!canSend}
-        >
-          <Text style={[styles.sendBtnText, { color: colorScheme === 'dark' ? '#000' : '#fff' }]}>
-            Envoyer
-          </Text>
-        </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.sendBtn,
+              (canSend && !submitting) ? buttonStyles.primary : [buttonStyles.secondary, buttonStyles.disabled],
+            ]}
+            onPress={handleSend}
+            disabled={!canSend || submitting}
+            testID="answer-send"
+          >
+            <Text style={[(canSend && !submitting) ? buttonStyles.primaryText : buttonStyles.secondaryText, (!canSend || submitting) && styles.sendBtnDisabledText]}>
+              {submitting ? copy.submitSending : 'Envoyer'}
+            </Text>
+          </TouchableOpacity>
+        </Animated.View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fafafa' },
-  scroll: { padding: 24, paddingTop: 32 },
-  link: { color: '#2f95dc', marginTop: 16 },
-  question: { fontSize: 20, fontWeight: '600', marginBottom: 8 },
-  typeLabel: { fontSize: 12, color: '#888', marginBottom: 20, textTransform: 'capitalize' },
-  errorBox: { padding: 12, borderRadius: 8, borderWidth: 1, marginBottom: 16 },
-  errorText: { fontSize: 14, color: '#c44' },
+  container: { flex: 1 },
+  scroll: { padding: spacing.xl },
+  scrollContent: { paddingTop: spacing.xl },
+  questionBlock: { marginBottom: spacing.lg },
+  questionTitle: { marginBottom: spacing.xs },
+  rewardRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: spacing.sm, marginBottom: spacing.lg },
+  rewardAmount: { fontSize: 16, fontWeight: '600' },
+  errorBox: { padding: spacing.lg, borderRadius: radius.md, borderWidth: 1, marginBottom: spacing.lg },
+  errorText: { fontSize: 14, color: colors.danger },
   textInput: {
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 12,
-    padding: 16,
+    borderRadius: radius.md,
+    padding: spacing.lg,
     fontSize: 16,
     minHeight: 100,
     textAlignVertical: 'top',
-    marginBottom: 24,
+    marginBottom: spacing.xl,
   },
-  options: { gap: 12, marginBottom: 24 },
-  option: {
-    padding: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#ddd',
-  },
-  optionSelected: { borderColor: '#171717', backgroundColor: '#f0f0f0' },
-  optionText: { fontSize: 16 },
-  optionTextSelected: { fontWeight: '600' },
-  sendBtn: {
-    backgroundColor: '#171717',
-    paddingVertical: 16,
-    borderRadius: 12,
+  responseTypeLabel: { marginBottom: spacing.sm },
+  options: { gap: spacing.md, marginBottom: spacing.xl },
+  optionPill: {
+    paddingVertical: spacing.lg,
+    paddingHorizontal: spacing.xl,
+    borderRadius: radius.lg,
+    borderWidth: 1.5,
     alignItems: 'center',
   },
-  sendBtnDisabled: { opacity: 0.5 },
-  sendBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  optionTextSelected: { fontWeight: '600', color: colors.success },
+  sendBtn: {
+    paddingVertical: spacing.lg,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    minHeight: 48,
+    marginTop: spacing.sm,
+  },
+  sendBtnDisabledText: { color: colors.textMuted },
   rewardContainer: { justifyContent: 'center', alignItems: 'center' },
   rewardCard: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 32,
+    borderRadius: radius.xl,
+    padding: spacing.section,
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 4,
     minWidth: 280,
   },
-  rewardTitle: { fontSize: 18, fontWeight: '600', marginBottom: 12 },
-  rewardAmount: { fontSize: 32, fontWeight: '700', color: '#0a0', marginBottom: 8 },
-  rewardSub: { fontSize: 14, color: '#666', marginBottom: 24 },
-  rewardBtn: {
-    backgroundColor: '#171717',
-    paddingVertical: 12,
-    paddingHorizontal: 32,
-    borderRadius: 12,
+  rewardCardAmount: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: colors.success,
+    marginBottom: spacing.sm,
   },
-  rewardBtnText: { color: '#fff', fontWeight: '600' },
   center: { justifyContent: 'center', alignItems: 'center' },
 });

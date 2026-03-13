@@ -34,6 +34,8 @@ interface WalletState {
 interface AppState extends OnboardingState, WalletState {
   setOnboarding: (age: number | null, region: string | null, tags: string[]) => void;
   completeOnboarding: () => void;
+  /** Remet l'état app à zéro (signOut). À appeler après signOut + ensureAnonSession, avant redirection onboarding. */
+  resetForSignOut: () => void;
   addHistoryEntry: (entry: HistoryEntry) => void;
   addPendingReward: (amount: number) => void;
   setServerWallet: (data: ServerWalletData | null) => void;
@@ -41,6 +43,8 @@ interface AppState extends OnboardingState, WalletState {
   simulateValidation: (amount: number) => void;
   /** DEV: transfère tout le pending vers available */
   validateAllPending: () => void;
+  /** Sans backend : remet pending/available/history à zéro pour ne pas afficher d'anciennes données mock. */
+  clearLocalWalletForNoBackend: () => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -61,6 +65,18 @@ export const useAppStore = create<AppState>((set) => ({
 
   completeOnboarding: () =>
     set({ completed: true }),
+
+  resetForSignOut: () =>
+    set({
+      completed: false,
+      age: null,
+      region: null,
+      tags: [],
+      serverWallet: null,
+      pending: 0,
+      available: 0,
+      history: [],
+    }),
 
   addHistoryEntry: (entry) =>
     set((s) => ({ history: [entry, ...s.history] })),
@@ -92,6 +108,9 @@ export const useAppStore = create<AppState>((set) => ({
       available: s.available + s.pending,
       history: s.history.map((h) => ({ ...h, status: 'available' as const })),
     })),
+
+  clearLocalWalletForNoBackend: () =>
+    set({ pending: 0, available: 0, history: [] }),
 }));
 
 export function getAppStore() {
