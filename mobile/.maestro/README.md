@@ -67,3 +67,5 @@ Ne pas renommer ces testID sans mettre à jour les flows Maestro concernés.
 <!-- trigger mobile quality -->
 
 <!-- force mobile quality rerun -->
+
+<!-- ci rerun mobile -->
