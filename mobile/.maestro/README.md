@@ -63,3 +63,5 @@ Détail : voir `mobile/TESTABILITY.md`.
 - **Wallet** : `wallet-screen`, `wallet-withdraw-cta`, `wallet-continue-cta`, `wallet-my-withdrawals`, `wallet-withdraw-section`
 
 Ne pas renommer ces testID sans mettre à jour les flows Maestro concernés.
+
+<!-- trigger mobile quality -->
