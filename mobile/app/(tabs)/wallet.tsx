@@ -1,10 +1,11 @@
 /**
- * Wallet — Pending, Disponible, total, historique.
- * Si Supabase configuré : lecture user_balances + 20 dernières responses.
- * Sinon : store local. DEV : identité + source (SB/MOCK), copier ID campagne pour validation dashboard.
+ * Wallet — Pending, Disponible, total, historique, retraits.
+ * Si Supabase configuré : user_balances + responses (historique gains) + withdrawals (Mes retraits).
+ * CTA "Demander un retrait" → RPC request_withdrawal (réel) ; prérequis : min 5 €, pas de gel compte, plafond journalier.
+ * "Mes retraits" = fetchMyWithdrawals() (pending / paid / rejected). Aucune donnée fictive.
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import {
   StyleSheet,
   View,
@@ -12,15 +13,95 @@ import {
   ScrollView,
   TextInput,
   RefreshControl,
+  Animated,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, router } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 import { Text } from '@/components/Themed';
 import { useAppStore } from '@/store/useAppStore';
-import { isSupabaseConfigured, fetchWalletFromSupabase, requestWithdrawal, fetchMyWithdrawals, type WithdrawalRow } from '@/lib/supabaseApi';
+import { isSupabaseConfigured, fetchWalletFromSupabase, requestWithdrawal, fetchMyWithdrawals, type WithdrawalRow, type ServerWalletHistoryEntry } from '@/lib/supabaseApi';
 import { supabase } from '@/lib/supabase';
 import { wallet as copy } from '@/lib/uiCopy';
+import { SHOW_DEBUG_UI } from '@/lib/debugFlags';
+import { colors, spacing, radius, typo, buttonStyles, badgeStyles } from '@/lib/uiTheme';
+import { PressableScale } from '@/components/PressableScale';
+
+/** Entrée normalisée pour affichage (serveur ou local). */
+type NormalizedHistoryEntry = {
+  id: string;
+  date: Date;
+  questionText: string;
+  answer: string;
+  rewardEuros: number;
+  status: 'available' | 'pending';
+};
+
+const INITIAL_HISTORY_LIMIT = 12;
+
+function normalizeServerEntry(e: ServerWalletHistoryEntry): NormalizedHistoryEntry {
+  return {
+    id: e.id,
+    date: new Date(e.createdAt),
+    questionText: e.questionText,
+    answer: e.answer ?? '—',
+    rewardEuros: e.rewardCents / 100,
+    status: e.payoutStatus,
+  };
+}
+
+function normalizeLocalEntry(e: { id: string; at: string; questionTitle: string; answer: string; reward: number; status: 'available' | 'pending' }): NormalizedHistoryEntry {
+  return {
+    id: e.id,
+    date: new Date(e.at),
+    questionText: e.questionTitle,
+    answer: e.answer,
+    rewardEuros: e.reward,
+    status: e.status,
+  };
+}
+
+function startOfDay(d: Date): Date {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+
+function startOfWeek(d: Date): Date {
+  const x = new Date(d);
+  const day = x.getDay();
+  const diff = x.getDate() - day + (day === 0 ? -6 : 1);
+  x.setDate(diff);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+
+function groupByPeriod(entries: NormalizedHistoryEntry[], now: Date): { today: NormalizedHistoryEntry[]; thisWeek: NormalizedHistoryEntry[]; older: NormalizedHistoryEntry[] } {
+  const todayStart = startOfDay(now);
+  const weekStart = startOfWeek(now);
+  const today: NormalizedHistoryEntry[] = [];
+  const thisWeek: NormalizedHistoryEntry[] = [];
+  const older: NormalizedHistoryEntry[] = [];
+  for (const e of entries) {
+    const t = e.date.getTime();
+    if (t >= todayStart.getTime()) today.push(e);
+    else if (t >= weekStart.getTime()) thisWeek.push(e);
+    else older.push(e);
+  }
+  return { today, thisWeek, older };
+}
+
+function formatEntryDate(d: Date): string {
+  const today = startOfDay(new Date());
+  const dDay = startOfDay(d);
+  if (dDay.getTime() === today.getTime()) {
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  }
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year = d.getFullYear();
+  return `${day}/${month}/${year}`;
+}
 
 export default function WalletScreen() {
   const insets = useSafeAreaInsets();
@@ -41,7 +122,10 @@ export default function WalletScreen() {
   const [withdrawAmount, setWithdrawAmount] = useState('5.00');
   const [withdrawing, setWithdrawing] = useState(false);
   const [withdrawError, setWithdrawError] = useState<string | null>(null);
+  const [withdrawSuccess, setWithdrawSuccess] = useState(false);
   const [myWithdrawals, setMyWithdrawals] = useState<WithdrawalRow[]>([]);
+  const [historyFilter, setHistoryFilter] = useState<'all' | 'available' | 'pending'>('all');
+  const [showAllHistory, setShowAllHistory] = useState(false);
 
   const useServer = isSupabaseConfigured();
 
@@ -61,6 +145,28 @@ export default function WalletScreen() {
   const total = pendingVal + availableVal;
   const lastCampaignId = serverWallet?.history?.[0]?.campaignId ?? null;
   const serverHistoryEmpty = !serverWallet?.history?.length;
+
+  const normalizedList = useMemo(() => {
+    if (useServer && serverWallet?.history) {
+      return serverWallet.history.map(normalizeServerEntry).sort((a, b) => b.date.getTime() - a.date.getTime());
+    }
+    return history
+      .map((e) => normalizeLocalEntry({ id: e.id, at: e.at, questionTitle: e.questionTitle, answer: e.answer, reward: e.reward, status: e.status }))
+      .sort((a, b) => b.date.getTime() - a.date.getTime());
+  }, [useServer, serverWallet?.history, history]);
+
+  const filteredList = useMemo(() => {
+    if (historyFilter === 'all') return normalizedList;
+    return normalizedList.filter((e) => e.status === historyFilter);
+  }, [normalizedList, historyFilter]);
+
+  const displayedList = useMemo(() => {
+    if (showAllHistory) return filteredList;
+    return filteredList.slice(0, INITIAL_HISTORY_LIMIT);
+  }, [filteredList, showAllHistory]);
+
+  const grouped = useMemo(() => groupByPeriod(displayedList, new Date()), [displayedList]);
+  const hasMoreHistory = filteredList.length > INITIAL_HISTORY_LIMIT && !showAllHistory;
 
   const refreshWallet = useCallback(async () => {
     if (!useServer) return;
@@ -149,23 +255,37 @@ export default function WalletScreen() {
       setWithdrawError(withdrawErrorFromApi(result.error.message));
       return;
     }
+    setWithdrawError(null);
     setWithdrawAmount('5.00');
     await refreshWallet();
+    setWithdrawSuccess(true);
+    setTimeout(() => setWithdrawSuccess(false), 3000);
   }, [useServer, canWithdraw, withdrawAmount, availableVal, refreshWallet]);
+
+  const wBg = colors.walletBackground;
+  const wSurface = colors.walletSurface;
+  const wElevated = colors.walletSurfaceElevated;
+  /** Token positif canonique Wallet (émeraude). Ne pas utiliser success dans cet écran. */
+  const wBalance = colors.walletBalance;
+  const wBorder = colors.walletBorder;
+
+  const heroFade = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(heroFade, { toValue: 1, duration: 220, useNativeDriver: true }).start();
+  }, [heroFade]);
 
   return (
     <ScrollView
-      style={[styles.container, { paddingTop: insets.top + 24 }]}
-      contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}
+      style={[styles.container, { paddingTop: spacing.md, backgroundColor: wBg }]}
+      contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + spacing.xl }]}
+      testID="wallet-screen"
       refreshControl={
         useServer ? (
-          <RefreshControl refreshing={refreshing} onRefresh={refreshWallet} />
+          <RefreshControl refreshing={refreshing} onRefresh={refreshWallet} tintColor={wBalance} />
         ) : undefined
       }
     >
-      <Text style={styles.header}>{copy.title}</Text>
-
-      {__DEV__ && (
+      {SHOW_DEBUG_UI && (
         <View style={styles.devIdentity}>
           <Text style={styles.devIdentityTitle}>DEV</Text>
           <Text style={styles.devIdentityLine} numberOfLines={1}>
@@ -177,166 +297,279 @@ export default function WalletScreen() {
           {copyFeedback === 'Copié' ? <Text style={styles.devResult}>Copié</Text> : null}
           <View style={styles.sourceBadgeRow}>
             <Text style={styles.sourceBadgeLabel}>SOURCE: </Text>
-            <View style={[styles.sourceBadge, sourceBadge === 'SB' ? styles.sourceBadgeSb : styles.sourceBadgeMock]}>
-              <Text style={styles.sourceBadgeText}>{sourceBadge}</Text>
+            <View style={[badgeStyles.base, sourceBadge === 'SB' ? { backgroundColor: colors.walletBalanceMuted, borderWidth: 1, borderColor: wBalance } : badgeStyles.neutral]}>
+              <Text style={[styles.sourceBadgeText, sourceBadge === 'SB' && { color: wBalance }]}>{sourceBadge}</Text>
             </View>
           </View>
         </View>
       )}
 
       {useServer && serverWallet && !hasBalanceRow && (
-        <View style={styles.noBalanceBanner}>
-          <Text style={styles.noBalanceText}>{copy.noBalanceBanner}</Text>
+        <View style={[styles.noBalanceBanner, { backgroundColor: colors.warningMuted, borderColor: colors.warning }]}>
+          <Text style={[typo.caption, { color: colors.textPrimary }]}>{copy.noBalanceBanner}</Text>
         </View>
       )}
 
-      <View style={styles.cards}>
-        <View style={styles.card}>
-          <Text style={styles.cardLabel}>{copy.pendingLabel}</Text>
-          <Text style={styles.cardHint}>{copy.pendingHint}</Text>
-          <Text style={styles.cardValue}>{pendingVal.toFixed(2)} €</Text>
+      {/* 1. Hero principal — montant disponible dominant, un seul sous-texte */}
+      <Animated.View style={{ opacity: heroFade }}>
+        <View style={[styles.hero, { backgroundColor: wElevated, borderColor: wBorder, borderLeftColor: wBalance, borderLeftWidth: 4 }]}>
+          <Text style={[styles.heroAvailableLabel, { color: colors.textSecondary }]}>{copy.availableLabel}</Text>
+          <Text style={[styles.heroAvailableAmount, { color: wBalance }]}>{availableVal.toFixed(2)} €</Text>
+          <Text style={[styles.heroAvailableHint, { color: colors.textMuted }]}>
+            {total === 0
+              ? copy.heroSubtextPendingOnly
+              : availableVal >= 5
+                ? `${pendingVal.toFixed(2)} € ${copy.pendingLabel.toLowerCase()} · ${copy.heroSubtextMinWithdraw}`
+                : availableVal > 0
+                  ? `${pendingVal.toFixed(2)} € ${copy.pendingLabel.toLowerCase()} · ${(5 - availableVal).toFixed(2)} € ${copy.heroSubtextRemaining}`
+                  : `${pendingVal.toFixed(2)} € ${copy.pendingLabel.toLowerCase()} · ${copy.heroSubtextMinWithdraw}`}
+          </Text>
         </View>
-        <View style={styles.card}>
-          <Text style={styles.cardLabel}>{copy.availableLabel}</Text>
-          <Text style={styles.cardHint}>{copy.availableHint}</Text>
-          <Text style={[styles.cardValue, styles.cardValueGreen]}>{availableVal.toFixed(2)} €</Text>
-        </View>
-      </View>
+      </Animated.View>
 
-      <View style={styles.totalRow}>
-        <Text style={styles.totalLabel}>{copy.totalLabel}</Text>
-        <Text style={styles.totalValue}>{total.toFixed(2)} €</Text>
-      </View>
-
-      {useServer && (
-        <View style={styles.withdrawSection}>
-          <Text style={styles.withdrawTitle}>{copy.withdrawTitle}</Text>
+      {/* 2. Action principale unique — Demander un retrait OU Continuer à répondre */}
+      {useServer && canWithdraw ? (
+        <View style={[styles.withdrawSection, { backgroundColor: wElevated, borderColor: wBorder }]} testID="wallet-withdraw-section">
+          <Text style={[styles.withdrawMinHint, { color: colors.textMuted }]}>{copy.withdrawMinAmount}</Text>
           <TextInput
-            style={styles.withdrawInput}
+            style={[styles.withdrawInput, { backgroundColor: wSurface, borderColor: wBorder, color: colors.textPrimary }]}
             value={withdrawAmount}
             onChangeText={setWithdrawAmount}
             placeholder="5.00"
-            placeholderTextColor="#888"
+            placeholderTextColor={colors.textMuted}
             keyboardType="decimal-pad"
+            testID="wallet-withdraw-input"
           />
-          <TouchableOpacity
-            style={[styles.withdrawBtn, (!canWithdraw || withdrawing) && styles.withdrawBtnDisabled]}
+          <PressableScale
+            style={[styles.withdrawCta, { backgroundColor: wBalance }, ...((!canWithdraw || withdrawing) ? [styles.withdrawCtaDisabled] : [])]}
             onPress={handleWithdraw}
             disabled={!canWithdraw || withdrawing}
+            testID="wallet-withdraw-cta"
           >
-            <Text style={styles.withdrawBtnText}>
+            <Text style={styles.withdrawCtaText}>
               {withdrawing ? copy.withdrawSending : copy.withdrawButton}
             </Text>
-          </TouchableOpacity>
+          </PressableScale>
           {withdrawError ? <Text style={styles.withdrawError}>{withdrawError}</Text> : null}
-          {useServer && availableVal < 5 && availableVal > 0 && (
-            <Text style={styles.withdrawHint}>{copy.withdrawHintMin}</Text>
+          {withdrawSuccess ? <Text style={[styles.withdrawSuccess, { color: colors.success }]}>{copy.withdrawSuccess}</Text> : null}
+          {availableVal < 5 && availableVal > 0 && (
+            <Text style={styles.withdrawHintBelow}>{copy.withdrawHintMin}</Text>
+          )}
+        </View>
+      ) : (
+        <PressableScale
+          style={[styles.primaryCta, { backgroundColor: wBalance }]}
+          onPress={() => router.push('/(tabs)/feed')}
+          testID="wallet-continue-cta"
+        >
+          <Text style={styles.primaryCtaText}>{copy.ctaContinueResponding}</Text>
+        </PressableScale>
+      )}
+
+      {/* 3. Résumé secondaire — Disponible, En attente, Total gagné */}
+      <View style={[styles.summarySecondary, { backgroundColor: wSurface, borderColor: wBorder }]}>
+        <View style={styles.summarySecondaryCell}>
+          <Text style={[styles.summarySecondaryLabel, { color: colors.textMuted }]}>{copy.availableLabel}</Text>
+          <Text style={[styles.summarySecondaryValue, { color: wBalance }]}>{availableVal.toFixed(2)} €</Text>
+        </View>
+        <View style={[styles.summarySecondaryDivider, { backgroundColor: wBorder }]} />
+        <View style={styles.summarySecondaryCell}>
+          <Text style={[styles.summarySecondaryLabel, { color: colors.textMuted }]}>{copy.pendingLabel}</Text>
+          <Text style={[styles.summarySecondaryValue, { color: colors.textPrimary }]}>{pendingVal.toFixed(2)} €</Text>
+        </View>
+        <View style={[styles.summarySecondaryDivider, { backgroundColor: wBorder }]} />
+        <View style={styles.summarySecondaryCell}>
+          <Text style={[styles.summarySecondaryLabel, { color: colors.textMuted }]}>{copy.totalEarnedLabel}</Text>
+          <Text style={[styles.summarySecondaryValue, { color: colors.textPrimary }]}>{total.toFixed(2)} €</Text>
+        </View>
+      </View>
+
+      {SHOW_DEBUG_UI && (
+        <View style={[styles.devSection, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+          <Text style={[typo.caption, { color: colors.textSecondary, marginBottom: spacing.sm }]}>
+            {useServer ? 'Validation = dashboard' : 'Simuler validation'}
+          </Text>
+          {useServer ? (
+            <>
+              <Text style={[typo.muted, { marginBottom: spacing.sm }]}>
+                {serverHistoryEmpty
+                  ? "Répondez d&apos;abord (SB)"
+                  : 'Validation entreprise = dashboard.'}
+              </Text>
+              <TouchableOpacity
+                style={[buttonStyles.secondary, serverHistoryEmpty && buttonStyles.disabled]}
+                onPress={handleCopyCampaignId}
+                disabled={serverHistoryEmpty}
+              >
+                <Text style={buttonStyles.secondaryText}>Copier l&apos;ID campagne</Text>
+              </TouchableOpacity>
+              {copyFeedback ? <Text style={[typo.muted, { marginTop: spacing.sm }]}>{copyFeedback}</Text> : null}
+            </>
+          ) : (
+            <>
+              <TextInput
+                style={[styles.devInput, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.textPrimary }]}
+                value={devAmount}
+                onChangeText={setDevAmount}
+                placeholder="Montant (vide = tout)"
+                placeholderTextColor={colors.textMuted}
+                keyboardType="decimal-pad"
+              />
+              <TouchableOpacity style={buttonStyles.secondary} onPress={handleSimulate}>
+                <Text style={buttonStyles.secondaryText}>Transférer pending → disponible</Text>
+              </TouchableOpacity>
+            </>
           )}
         </View>
       )}
 
-      <View style={styles.devSection}>
-        <Text style={styles.devTitle}>
-          DEV — {useServer ? 'Validation = dashboard' : 'Simuler validation'}
-        </Text>
-        {useServer ? (
-          <>
-            <Text style={styles.devHint}>
-              {serverHistoryEmpty
-                ? "Répondez d'abord (SB)"
-                : 'Validation entreprise = dashboard.'}
-            </Text>
-            <TouchableOpacity
-              style={[styles.devBtn, serverHistoryEmpty && styles.devBtnDisabled]}
-              onPress={handleCopyCampaignId}
-              disabled={serverHistoryEmpty}
-            >
-              <Text style={styles.devBtnText}>Copier l'ID campagne dans le presse-papier</Text>
-            </TouchableOpacity>
-            {copyFeedback ? <Text style={styles.devResult}>{copyFeedback}</Text> : null}
-          </>
-        ) : (
-          <>
-            <TextInput
-              style={styles.devInput}
-              value={devAmount}
-              onChangeText={setDevAmount}
-              placeholder="Montant (vide = tout)"
-              placeholderTextColor="#888"
-              keyboardType="decimal-pad"
-            />
-            <TouchableOpacity style={styles.devBtn} onPress={handleSimulate}>
-              <Text style={styles.devBtnText}>Transférer pending → disponible</Text>
-            </TouchableOpacity>
-          </>
-        )}
-      </View>
-
-      {useServer && (
+      {/* 4. Activité récente */}
+      {historyList.length > 0 && (
         <>
-          <Text style={styles.historyTitle}>{copy.myWithdrawalsTitle}</Text>
-          {myWithdrawals.length === 0 ? (
-            <Text style={styles.empty}>{copy.emptyWithdrawals}</Text>
-          ) : (
-            <View style={styles.withdrawalsListBlock}>
-            {myWithdrawals.map((w) => (
-              <View key={w.id} style={styles.historyRow}>
-                <View style={styles.historyLeft}>
-                  <Text style={styles.historyQuestion}>{(w.amount_cents / 100).toFixed(2)} €</Text>
-                  <Text style={styles.historyAnswer}>
-                    {formatWithdrawalDate(w.created_at, w.decided_at)}
-                  </Text>
-                  {w.method ? (
-                    <Text style={styles.withdrawMethod}>Méthode: {w.method}</Text>
-                  ) : null}
-                </View>
-                <View style={styles.historyRight}>
-                  <View style={[styles.badge, w.status === 'paid' ? styles.badgeOk : w.status === 'rejected' ? styles.badgeRejected : styles.badgePending]}>
-                    <Text style={styles.badgeText}>
-                      {w.status === 'pending' ? copy.statusPending : w.status === 'paid' ? copy.statusPaid : copy.statusRejected}
-                    </Text>
-                  </View>
-                </View>
-              </View>
+          <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>{copy.activityRecentTitle}</Text>
+          <View style={styles.filterRow}>
+            {(['all', 'available', 'pending'] as const).map((key) => (
+              <TouchableOpacity
+                key={key}
+                style={[
+                  styles.filterChip,
+                  { borderColor: wBorder, backgroundColor: historyFilter === key ? wElevated : wBg },
+                ]}
+                onPress={() => setHistoryFilter(key)}
+              >
+                <Text style={[styles.filterChipText, { color: historyFilter === key ? colors.textPrimary : colors.textSecondary }]}>
+                  {key === 'all' ? copy.filterAll : key === 'available' ? copy.filterAvailable : copy.filterPending}
+                </Text>
+              </TouchableOpacity>
             ))}
-            </View>
-          )}
+          </View>
+
+          <View style={[styles.historyCard, { backgroundColor: wBg, borderColor: wBorder }]}>
+            {filteredList.length === 0 ? (
+              <Text style={styles.emptyList}>
+                {historyFilter === 'all' ? copy.emptyHistory : copy.filterEmpty}
+              </Text>
+            ) : (
+              <>
+                {grouped.today.length > 0 && (
+                  <View style={[styles.groupBlock, styles.groupBlockToday, { borderLeftColor: wBalance }]}>
+                    <Text style={[typo.label, { color: wBalance, marginBottom: spacing.sm }]}>{copy.todayLabel}</Text>
+                    {grouped.today.map((entry) => (
+                      <View key={entry.id} style={[styles.historyRowRefined, { borderBottomColor: wBorder }]}>
+                        <View style={styles.historyRowMain}>
+                          <Text style={[styles.historyRowQuestion, { color: colors.textPrimary }]} numberOfLines={2}>{entry.questionText}</Text>
+                          <Text style={[styles.historyRowAnswer, { color: colors.textSecondary }]} numberOfLines={1}>{entry.answer}</Text>
+                        </View>
+                        <View style={styles.historyRowMeta}>
+                          <Text style={[styles.historyRowDate, { color: colors.textMuted }]}>{formatEntryDate(entry.date)}</Text>
+                          <Text style={[styles.historyRowRewardRefined, { color: wBalance }]}>+{entry.rewardEuros.toFixed(2)} €</Text>
+                          <View style={[badgeStyles.base, entry.status === 'available' ? { backgroundColor: colors.walletBalanceMuted, borderWidth: 1, borderColor: wBalance } : badgeStyles.warning]}>
+                            <Text style={[styles.badgeTextSmall, entry.status === 'available' && { color: wBalance }]}>{entry.status === 'available' ? copy.statusAvailable : copy.statusPending}</Text>
+                          </View>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                )}
+                {grouped.thisWeek.length > 0 && (
+                  <View style={[styles.groupBlock, styles.groupBlockWeek, { borderLeftColor: wBorder }]}>
+                    <Text style={[typo.label, { color: colors.textSecondary, marginBottom: spacing.sm }]}>{copy.thisWeekLabel}</Text>
+                    {grouped.thisWeek.map((entry) => (
+                      <View key={entry.id} style={[styles.historyRowRefined, { borderBottomColor: wBorder }]}>
+                        <View style={styles.historyRowMain}>
+                          <Text style={[styles.historyRowQuestion, { color: colors.textPrimary }]} numberOfLines={2}>{entry.questionText}</Text>
+                          <Text style={[styles.historyRowAnswer, { color: colors.textSecondary }]} numberOfLines={1}>{entry.answer}</Text>
+                        </View>
+                        <View style={styles.historyRowMeta}>
+                          <Text style={[styles.historyRowDate, { color: colors.textMuted }]}>{formatEntryDate(entry.date)}</Text>
+                          <Text style={[styles.historyRowRewardRefined, { color: wBalance }]}>+{entry.rewardEuros.toFixed(2)} €</Text>
+                          <View style={[badgeStyles.base, entry.status === 'available' ? { backgroundColor: colors.walletBalanceMuted, borderWidth: 1, borderColor: wBalance } : badgeStyles.warning]}>
+                            <Text style={[styles.badgeTextSmall, entry.status === 'available' && { color: wBalance }]}>{entry.status === 'available' ? copy.statusAvailable : copy.statusPending}</Text>
+                          </View>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                )}
+                {grouped.older.length > 0 && (
+                  <View style={[styles.groupBlock, styles.groupBlockOlder, { borderLeftColor: wBorder }]}>
+                    <Text style={[typo.label, { color: colors.textMuted, marginBottom: spacing.sm }]}>{copy.olderLabel}</Text>
+                    {grouped.older.map((entry) => (
+                      <View key={entry.id} style={[styles.historyRowRefined, { borderBottomColor: wBorder }]}>
+                        <View style={styles.historyRowMain}>
+                          <Text style={[styles.historyRowQuestion, { color: colors.textPrimary }]} numberOfLines={2}>{entry.questionText}</Text>
+                          <Text style={[styles.historyRowAnswer, { color: colors.textSecondary }]} numberOfLines={1}>{entry.answer}</Text>
+                        </View>
+                        <View style={styles.historyRowMeta}>
+                          <Text style={[styles.historyRowDate, { color: colors.textMuted }]}>{formatEntryDate(entry.date)}</Text>
+                          <Text style={[styles.historyRowRewardRefined, { color: wBalance }]}>+{entry.rewardEuros.toFixed(2)} €</Text>
+                          <View style={[badgeStyles.base, entry.status === 'available' ? { backgroundColor: colors.walletBalanceMuted, borderWidth: 1, borderColor: wBalance } : badgeStyles.warning]}>
+                            <Text style={[styles.badgeTextSmall, entry.status === 'available' && { color: wBalance }]}>{entry.status === 'available' ? copy.statusAvailable : copy.statusPending}</Text>
+                          </View>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                )}
+                {hasMoreHistory && (
+                  <PressableScale
+                    style={[styles.seeMoreBtn, { borderColor: wBorder }]}
+                    onPress={() => setShowAllHistory(true)}
+                  >
+                    <Text style={[typo.caption, { color: colors.textSecondary }]}>{copy.seeMoreHistory}</Text>
+                  </PressableScale>
+                )}
+              </>
+            )}
+          </View>
         </>
       )}
 
-      <Text style={styles.historyTitle}>{copy.historyTitle}</Text>
-      {historyList.length === 0 ? (
-        <Text style={styles.empty}>{copy.emptyHistory}</Text>
-      ) : useServer ? (
-        (serverWallet?.history ?? []).map((entry) => (
-          <View key={entry.id} style={styles.historyRow}>
-            <View style={styles.historyLeft}>
-              <Text style={styles.historyQuestion} numberOfLines={2}>{entry.questionText}</Text>
-              <Text style={styles.historyAnswer} numberOfLines={1}>{entry.answer ?? '—'}</Text>
-            </View>
-            <View style={styles.historyRight}>
-              <Text style={styles.historyReward}>+{(entry.rewardCents / 100).toFixed(2)} €</Text>
-              <View style={[styles.badge, entry.payoutStatus === 'available' ? styles.badgeOk : styles.badgePending]}>
-                <Text style={styles.badgeText}>{entry.payoutStatus === 'available' ? copy.statusAvailable : copy.statusPending}</Text>
+      {/* 5. Mes retraits — historique des retraits, secondaire */}
+      {useServer && (
+        <View testID="wallet-my-withdrawals">
+          <Text style={[styles.sectionLabel, { color: colors.textSecondary, marginTop: spacing.lg }]}>{copy.myWithdrawalsTitle}</Text>
+          <View style={[styles.historyCard, { backgroundColor: wBg, borderColor: wBorder }]}>
+            {myWithdrawals.length === 0 ? (
+              <Text style={styles.emptyList}>{copy.emptyWithdrawals}</Text>
+            ) : (
+              <View style={styles.listBlock}>
+                {myWithdrawals.map((w) => (
+                  <View key={w.id} style={[styles.listRow, { borderBottomColor: wBorder }]}>
+                    <View style={styles.listRowLeft}>
+                      <Text style={styles.listRowAmount}>{(w.amount_cents / 100).toFixed(2)} €</Text>
+                      <Text style={styles.listRowDate}>{formatWithdrawalDate(w.created_at, w.decided_at)}</Text>
+                      {w.method ? <Text style={styles.listRowMeta}>Méthode: {w.method}</Text> : null}
+                    </View>
+                    <View style={styles.listRowRight}>
+                      <View style={[badgeStyles.base, w.status === 'paid' ? { backgroundColor: colors.walletBalanceMuted, borderColor: wBalance } : w.status === 'rejected' ? badgeStyles.danger : badgeStyles.warning]}>
+                        <Text style={styles.badgeText}>
+                          {w.status === 'pending' ? copy.statusPending : w.status === 'paid' ? copy.statusPaid : copy.statusRejected}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                ))}
               </View>
-            </View>
+            )}
           </View>
-        ))
-      ) : (
-        history.map((entry) => (
-          <View key={entry.id} style={styles.historyRow}>
-            <View style={styles.historyLeft}>
-              <Text style={styles.historyQuestion} numberOfLines={1}>{entry.questionTitle}</Text>
-              <Text style={styles.historyAnswer} numberOfLines={1}>{entry.answer}</Text>
-            </View>
-            <View style={styles.historyRight}>
-              <Text style={styles.historyReward}>+{entry.reward.toFixed(2)} €</Text>
-              <View style={[styles.badge, entry.status === 'available' ? styles.badgeOk : styles.badgePending]}>
-                <Text style={styles.badgeText}>{entry.status === 'available' ? copy.statusAvailable : copy.statusPending}</Text>
-              </View>
-            </View>
+        </View>
+      )}
+
+      {historyList.length === 0 && (
+        <>
+          <Text style={[styles.sectionLabelHistory, { color: colors.textSecondary }]}>{copy.historyTitle}</Text>
+          <View style={[styles.emptyStateCard, { backgroundColor: wSurface, borderColor: wBorder }]}>
+            <Text style={[styles.emptyStateTitle, { color: colors.textPrimary }]}>{copy.emptyHistory}</Text>
+            <Text style={[styles.emptyStateSubtext, { color: colors.textMuted }]}>{copy.emptyHistorySubtext}</Text>
+            <PressableScale
+              style={[styles.emptyStateCta, { backgroundColor: wBalance }]}
+              onPress={() => router.push('/(tabs)/feed')}
+            >
+              <Text style={styles.emptyStateCtaText}>{copy.emptyHistoryCta}</Text>
+            </PressableScale>
           </View>
-        ))
+        </>
       )}
     </ScrollView>
   );
@@ -344,120 +577,227 @@ export default function WalletScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  content: { paddingHorizontal: 24 },
-  header: { fontSize: 28, fontWeight: '700', marginBottom: 24 },
+  content: { paddingHorizontal: spacing.xl },
   devIdentity: {
-    backgroundColor: '#e8f4f8',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 16,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
     borderWidth: 1,
-    borderColor: '#b8d4e0',
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceElevated,
   },
-  devIdentityTitle: { fontSize: 11, fontWeight: '700', color: '#006688', marginBottom: 6 },
-  devIdentityLine: { fontSize: 11, color: '#333', marginBottom: 4 },
-  devCopyUserIdBtn: { backgroundColor: '#006688', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8, alignSelf: 'flex-start', marginTop: 8 },
-  devCopyUserIdBtnText: { color: '#fff', fontSize: 12, fontWeight: '600' },
-  sourceBadgeRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
-  sourceBadgeLabel: { fontSize: 11, color: '#666', marginRight: 4 },
-  sourceBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
-  sourceBadgeSb: { backgroundColor: '#0a0' },
-  sourceBadgeMock: { backgroundColor: '#888' },
-  sourceBadgeText: { fontSize: 11, fontWeight: '700', color: '#fff' },
+  devIdentityTitle: { fontSize: 11, fontWeight: '700', color: colors.trust, marginBottom: 6 },
+  devIdentityLine: { fontSize: 11, color: colors.textSecondary, marginBottom: 4 },
+  devCopyUserIdBtn: { backgroundColor: colors.trust, paddingVertical: spacing.sm, paddingHorizontal: spacing.md, borderRadius: radius.sm, alignSelf: 'flex-start', marginTop: spacing.sm },
+  devCopyUserIdBtnText: { color: colors.background, fontSize: 12, fontWeight: '600' },
+  sourceBadgeRow: { flexDirection: 'row', alignItems: 'center', marginTop: spacing.xs },
+  sourceBadgeLabel: { fontSize: 11, color: colors.textMuted, marginRight: spacing.xs },
+  sourceBadgeText: { fontSize: 11, fontWeight: '600', color: colors.textPrimary },
   noBalanceBanner: {
-    backgroundColor: '#fff3cd',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 16,
+    borderRadius: radius.sm,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
     borderWidth: 1,
-    borderColor: '#e6d9b8',
   },
-  noBalanceText: { fontSize: 13, color: '#856404' },
-  cards: { flexDirection: 'row', gap: 16, marginBottom: 20 },
-  card: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-    borderRadius: 16,
-    padding: 20,
+  hero: {
+    borderRadius: radius.lg,
+    padding: spacing.xl,
+    marginBottom: spacing.lg,
+    borderWidth: 1,
   },
-  cardLabel: { fontSize: 14, color: '#666', marginBottom: 2 },
-  cardHint: { fontSize: 11, color: '#888', marginBottom: 6 },
-  cardValue: { fontSize: 24, fontWeight: '700' },
-  cardValueGreen: { color: '#0a0' },
-  totalRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  heroAvailableLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: spacing.sm,
+  },
+  heroAvailableAmount: {
+    fontSize: 36,
+    fontWeight: '700',
+    marginBottom: spacing.sm,
+    letterSpacing: -0.5,
+  },
+  heroAvailableHint: {
+    fontSize: 12,
+  },
+  primaryCta: {
+    paddingVertical: spacing.lg,
+    paddingHorizontal: spacing.xl,
+    borderRadius: radius.md,
     alignItems: 'center',
-    marginBottom: 32,
-    paddingVertical: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#eee',
+    justifyContent: 'center',
+    minHeight: 48,
+    marginBottom: spacing.lg,
   },
-  totalLabel: { fontSize: 16, fontWeight: '600' },
-  totalValue: { fontSize: 20, fontWeight: '700' },
-  devSection: {
-    backgroundColor: '#fff8e6',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 32,
-    borderWidth: 1,
-    borderColor: '#e6d9b8',
-  },
-  devTitle: { fontSize: 12, fontWeight: '600', color: '#886600', marginBottom: 8 },
-  devHint: { fontSize: 12, color: '#666', marginBottom: 8 },
-  devInput: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 12,
+  primaryCtaText: {
     fontSize: 16,
+    fontWeight: '600',
+    color: '#0d0d0f',
   },
-  devBtn: { backgroundColor: '#b8860b', paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
-  devBtnDisabled: { opacity: 0.5 },
-  devBtnText: { color: '#fff', fontWeight: '600' },
-  devResult: { fontSize: 12, color: '#666', marginTop: 8 },
-  historyTitle: { fontSize: 18, fontWeight: '600', marginBottom: 12 },
-  empty: { color: '#888', marginBottom: 24 },
-  historyRow: {
+  summarySecondary: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-  },
-  historyLeft: { flex: 1, marginRight: 12 },
-  historyQuestion: { fontWeight: '600', marginBottom: 2 },
-  historyAnswer: { fontSize: 13, color: '#666' },
-  historyRight: { alignItems: 'flex-end' },
-  historyReward: { fontWeight: '600', color: '#0a0', marginBottom: 4 },
-  badge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
-  badgePending: { backgroundColor: '#fff3cd' },
-  badgeOk: { backgroundColor: '#d4edda' },
-  badgeRejected: { backgroundColor: '#f8d7da' },
-  badgeText: { fontSize: 11, fontWeight: '600' },
-  withdrawSection: {
-    backgroundColor: '#f0f8f0',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 24,
+    alignItems: 'stretch',
+    borderRadius: radius.lg,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.sm,
+    marginBottom: spacing.xl,
     borderWidth: 1,
-    borderColor: '#c8e6c9',
   },
-  withdrawTitle: { fontSize: 16, fontWeight: '600', marginBottom: 8 },
+  summarySecondaryCell: { flex: 1, minWidth: 0, alignItems: 'center', justifyContent: 'center' },
+  summarySecondaryLabel: { fontSize: 11, fontWeight: '600', marginBottom: 2, textAlign: 'center' },
+  summarySecondaryValue: { fontSize: 14, fontWeight: '700', textAlign: 'center' },
+  summarySecondaryDivider: { width: 1, alignSelf: 'stretch', marginHorizontal: spacing.xs, opacity: 0.5 },
+  withdrawSection: {
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    marginBottom: spacing.lg,
+    borderWidth: 1,
+  },
+  withdrawMinHint: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginBottom: spacing.md,
+  },
   withdrawInput: {
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 12,
+    borderRadius: radius.md,
+    padding: spacing.lg,
+    marginBottom: spacing.lg,
+    fontSize: 18,
+  },
+  withdrawCta: { marginBottom: spacing.sm },
+  withdrawCtaText: { fontSize: 16, fontWeight: '600', color: '#0d0d0f' },
+  withdrawCtaDisabled: { opacity: 0.45 },
+  withdrawError: { fontSize: 13, color: colors.danger, marginTop: spacing.sm },
+  withdrawSuccess: { fontSize: 13, marginTop: spacing.sm },
+  withdrawHintBelow: { fontSize: 12, color: colors.textMuted, marginTop: spacing.sm },
+  devSection: {
+    borderRadius: radius.md,
+    padding: spacing.lg,
+    marginBottom: spacing.xxl,
+    borderWidth: 1,
+  },
+  devInput: {
+    borderWidth: 1,
+    borderRadius: radius.sm,
+    padding: spacing.md,
+    marginBottom: spacing.md,
     fontSize: 16,
   },
-  withdrawBtn: { backgroundColor: '#2e7d32', paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
-  withdrawBtnDisabled: { opacity: 0.5 },
-  withdrawBtnText: { color: '#fff', fontWeight: '600' },
-  withdrawError: { fontSize: 12, color: '#c62828', marginTop: 8 },
-  withdrawHint: { fontSize: 12, color: '#666', marginTop: 6 },
-  withdrawMethod: { fontSize: 11, color: '#888', marginTop: 2 },
-  withdrawalsListBlock: { marginBottom: 24 },
+  devResult: { fontSize: 12, color: colors.textSecondary, marginTop: spacing.sm },
+  sectionLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.textSecondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginBottom: spacing.sm,
+  },
+  sectionLabelHistory: {
+    fontSize: 12,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginTop: spacing.lg,
+    marginBottom: spacing.sm,
+  },
+  filterRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.lg },
+  filterChip: {
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+  },
+  filterChipText: { fontSize: 13, fontWeight: '600' },
+  historyCard: {
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.lg,
+    marginBottom: spacing.xl,
+    overflow: 'hidden',
+    borderWidth: 1,
+  },
+  emptyList: {
+    fontSize: 15,
+    color: colors.textMuted,
+    paddingVertical: spacing.section,
+    textAlign: 'center',
+  },
+  emptyStateCard: {
+    borderRadius: radius.lg,
+    padding: spacing.xxl,
+    marginBottom: spacing.xl,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyStateTitle: {
+    fontSize: 17,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: spacing.sm,
+  },
+  emptyStateSubtext: {
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: spacing.xl,
+    paddingHorizontal: spacing.lg,
+  },
+  emptyStateCta: {
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.xl,
+    borderRadius: radius.md,
+    minWidth: 160,
+    alignItems: 'center',
+  },
+  emptyStateCtaText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.background,
+  },
+  groupBlock: { marginBottom: spacing.lg },
+  groupBlockToday: { paddingLeft: spacing.md, borderLeftWidth: 3, marginBottom: spacing.lg },
+  groupBlockWeek: { paddingLeft: spacing.md, borderLeftWidth: 2, opacity: 0.95 },
+  groupBlockOlder: { paddingLeft: spacing.md, borderLeftWidth: 1, opacity: 0.9 },
+  historyRowRefined: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    paddingVertical: spacing.sm + 2,
+    borderBottomWidth: 1,
+  },
+  historyRowMain: { flex: 1, marginRight: spacing.lg },
+  historyRowQuestion: { fontSize: 14, marginBottom: 2 },
+  historyRowAnswer: { fontSize: 12, marginBottom: 0 },
+  historyRowMeta: { alignItems: 'flex-end', minWidth: 88 },
+  historyRowDate: { fontSize: 11, marginBottom: 2 },
+  historyRowRewardRefined: { fontSize: 14, fontWeight: '600', marginBottom: 2 },
+  badgeTextSmall: { fontSize: 10, fontWeight: '600', color: colors.textPrimary },
+  seeMoreBtn: {
+    alignSelf: 'center',
+    marginTop: spacing.lg,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.xl,
+    borderRadius: radius.md,
+    borderWidth: 1,
+  },
+  listBlock: {},
+  listRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    paddingVertical: spacing.section,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  listRowLeft: { flex: 1, marginRight: spacing.lg },
+  listRowRight: { alignItems: 'flex-end' },
+  listRowAmount: { fontSize: 17, fontWeight: '700', color: colors.textPrimary, marginBottom: 2 },
+  listRowDate: { fontSize: 13, color: colors.textSecondary },
+  listRowMeta: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
+  listRowQuestion: { fontSize: 15, color: colors.textPrimary, marginBottom: 2 },
+  listRowAnswer: { fontSize: 13, color: colors.textSecondary },
+  listRowReward: { fontSize: 15, fontWeight: '600', color: colors.walletBalance, marginBottom: 4 },
+  badgeText: { fontSize: 11, fontWeight: '600', color: colors.textPrimary },
 });
