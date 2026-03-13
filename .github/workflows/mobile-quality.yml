@@ -14,7 +14,7 @@ on:
 
 jobs:
   quality:
-    name: typecheck & lint
+    name: Mobile quality check
     runs-on: ubuntu-latest
 
     steps:
@@ -38,7 +38,7 @@ jobs:
         run: npm --prefix mobile run lint
 
   maestro-structure:
-    name: Maestro flows present
+    name: Mobile Maestro flows
     runs-on: ubuntu-latest
 
     steps:
@@ -50,3 +50,4 @@ jobs:
         run: |
           test -d mobile/.maestro/flows
           find mobile/.maestro/flows -name "*.yaml" | grep -q .
+

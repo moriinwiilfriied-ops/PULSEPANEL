@@ -14,7 +14,7 @@ on:
 
 jobs:
   quality:
-    name: typecheck & lint
+    name: Dashboard quality check
     runs-on: ubuntu-latest
 
     steps:
@@ -36,3 +36,4 @@ jobs:
 
       - name: Lint
         run: npm --prefix dashboard run lint
+
