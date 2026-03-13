@@ -20,14 +20,14 @@ export function useThemeColor(
   props: { light?: string; dark?: string },
   colorName: keyof typeof Colors.light & keyof typeof Colors.dark
 ) {
-  const theme = useColorScheme();
+  const theme: 'light' | 'dark' = useColorScheme();
   const colorFromProps = props[theme];
 
   if (colorFromProps) {
     return colorFromProps;
-  } else {
-    return Colors[theme][colorName];
   }
+  const palette = Colors[theme];
+  return palette[colorName];
 }
 
 export function Text(props: TextProps) {

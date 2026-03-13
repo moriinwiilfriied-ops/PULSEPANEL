@@ -19,7 +19,6 @@ import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
 import { isSupabaseConfigured, upsertUserOnboarding } from '@/lib/supabaseApi';
 
-const REGIONS = ['Île-de-France', 'Provence-Alpes-Côte d\'Azur', 'Auvergne-Rhône-Alpes', 'Occitanie', 'Autre'];
 const TAGS = ['Tech', 'Mode', 'Alimentation', 'Sport', 'Voyage', 'Culture', 'Santé', 'Finance'];
 
 export default function OnboardingScreen() {
@@ -36,7 +35,7 @@ export default function OnboardingScreen() {
   const inputBg = colorScheme === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)';
   const borderColor = colors.tabIconDefault;
   const selectionColor = colors.tint;
-  const keyboardAppearance = colorScheme;
+  const keyboardAppearance: 'light' | 'dark' | 'default' | undefined = colorScheme;
 
   const toggleTag = (tag: string) => {
     setSelectedTags((prev) =>
@@ -103,7 +102,7 @@ export default function OnboardingScreen() {
         keyboardAppearance={keyboardAppearance}
       />
 
-      <Text style={[styles.label, { color: textColor }]}>Centres d'intérêt (optionnel)</Text>
+      <Text style={[styles.label, { color: textColor }]}>{'Centres d\'intérêt (optionnel)'}</Text>
       <View style={styles.chips}>
         {TAGS.map((tag) => (
           <TouchableOpacity
